@@ -83,8 +83,6 @@ tmux new -A -s claude-work claude
 | `done_marker` | 完成标记（默认 `ALL_DONE`）。 |
 | `poll_sec` | 轮询间隔秒（默认 `30`）。 |
 | `buffer_sec` | 恢复时刻后再多等的秒数（默认 `60`）。 |
-| `telegram_bot_token` | 与 `telegram_chat_id` 一起填，启用 Telegram 通知（手机收）。 |
-| `telegram_chat_id` | Telegram chat id。 |
 | `default_until` | 控制台"几点停"的默认值。 |
 | `default_max_rounds` | 默认最多轮数（`0` = 不限）。 |
 | `lang` | 通知语言：`en` 或 `zh`。 |
@@ -93,14 +91,25 @@ tmux new -A -s claude-work claude
 
 ## 通知
 
-Claude Wake 停止时会通知你，按可用性依次尝试：
+Claude Wake 在停止时（以及开启确认窗口后、额度恢复时）会通知你，按系统自动选择通道：
 
-1. **Telegram** —— 填了 `telegram_bot_token` + `telegram_chat_id`（手机收）。
+1. **Windows 弹窗** —— 经 `powershell.exe` 弹出系统级 toast（WSL 里也能弹；
+   Windows + WSL2 下默认走这条）。
 2. **Linux 桌面** —— `notify-send`。
 3. **macOS** —— `osascript` 通知。
-4. **Windows** —— `powershell.exe` 弹窗。
 
 可用**高级 -> 测试：发一条通知**按钮验证通路。
+
+### "先提醒我"确认窗口
+
+开启**"恢复后先提醒，等我确认"**后，额度恢复时不会立刻继续，而是先发一条通知、
+等待 N 分钟（你设定）。期间你可以在控制台：
+
+- **立即继续** —— 马上注入"继续"；
+- **停下，我来接手** —— 叫停 Claude Wake，自己接着干；
+- **什么都不做** —— 倒计时结束自动继续。
+
+这样你在电脑前时它就是一个纯提醒器，你不在时它仍然全自动干活。
 
 ---
 
@@ -108,8 +117,7 @@ Claude Wake 停止时会通知你，按可用性依次尝试：
 
 - 后端**只绑定 `127.0.0.1`**，外网不可达。
 - **从不读取你的 Claude 凭据**；只读会话记录文本和 tmux 屏幕，用于检测撞限与恢复时间。
-- 你的 Telegram token 存在本地、**已 gitignore** 的 `config.json` 里；控制台把它脱敏为
-  `***`，从不回显。
+- 工具自身**不发起任何网络请求**，一切都留在你的机器上。
 
 ---
 
@@ -127,6 +135,12 @@ Claude Wake 停止时会通知你，按可用性依次尝试：
 **为什么必须用 tmux？**
 Claude Wake 用 `tmux send-keys` 注入"继续"。tmux 提供一个稳定、有名字的会话作为目标；
 没有它就没有可靠的办法往你的活跃会话里打字。
+
+**我的对话是在普通终端（不在 tmux）里撞限的，怎么交接给它？**
+先关掉那个终端（两个进程不能共用同一个对话），再双击 `start.bat`。把
+`claude_launch_args` 设为 `--continue`（控制台「设置」里改），Claude 终端启动时就会
+自动续上 **`work_dir` 里最近的那个对话**——正是撞限的那个。想从列表里挑，就改用
+`--resume`。
 
 **控制台显示"没找到交互会话"。**
 说明 Claude 没跑在 tmux 里。运行 `tmux new -A -s claude-work claude`（或双击 `start.bat`）。

@@ -84,8 +84,6 @@ dashboard's **Settings** drawer -- no hand-editing required.
 | `done_marker` | Completion marker (default `ALL_DONE`). |
 | `poll_sec` | Polling interval in seconds (default `30`). |
 | `buffer_sec` | Extra seconds to wait past the reset moment (default `60`). |
-| `telegram_bot_token` | Set with `telegram_chat_id` to enable Telegram notifications. |
-| `telegram_chat_id` | Telegram chat id. |
 | `default_until` | Default value of the dashboard "stop at" control. |
 | `default_max_rounds` | Default max rounds (`0` = unlimited). |
 | `lang` | Notification language: `en` or `zh`. |
@@ -94,14 +92,28 @@ dashboard's **Settings** drawer -- no hand-editing required.
 
 ## Notifications
 
-Claude Wake notifies you when it stops, trying the first available channel:
+Claude Wake notifies you when it stops (and when the quota is restored, if you enable
+the confirm window). It picks the first channel that works on your system:
 
-1. **Telegram** -- if `telegram_bot_token` + `telegram_chat_id` are set (reaches your phone).
+1. **Windows toast** -- shown via `powershell.exe` (works from inside WSL; this is
+   the default path on Windows + WSL2).
 2. **Linux desktop** -- `notify-send`.
 3. **macOS** -- `osascript` notification.
-4. **Windows** -- a `powershell.exe` toast.
 
 Use the **Advanced -> Test: send a notification** button to verify the path.
+
+### "Remind me first" confirm window
+
+If you enable **"Remind me first, wait before continuing"**, then when the quota is
+restored Claude Wake does not continue immediately. Instead it sends a notification
+and waits N minutes (your choice). In the dashboard you can then:
+
+- **Continue now** -- inject "continue" immediately;
+- **Stop, I'll take over** -- stop Claude Wake and resume the work yourself;
+- **do nothing** -- it continues automatically when the countdown ends.
+
+This turns Claude Wake into a pure reminder when you happen to be at your desk,
+while still working unattended when you are not.
 
 ---
 
@@ -110,8 +122,7 @@ Use the **Advanced -> Test: send a notification** button to verify the path.
 - The backend binds to **`127.0.0.1` only** -- not reachable from the network.
 - It **never reads your Claude credentials**; it only reads transcript text and the
   tmux pane to detect the limit and the reset time.
-- Your Telegram token stays in the local, **gitignored** `config.json`. The
-  dashboard masks it as `***` and never echoes it back.
+- It makes **no network requests** of its own; everything stays on your machine.
 
 ---
 
@@ -130,6 +141,13 @@ Use the **Advanced -> Test: send a notification** button to verify the path.
 **Why must Claude run inside tmux?**
 Claude Wake injects "continue" with `tmux send-keys`. tmux gives a stable, named
 session to target; without it there is no reliable way to type into your live session.
+
+**My conversation hit the limit in a normal terminal (not tmux). How do I hand it over?**
+Close that terminal first (two processes must not share one conversation), then
+double-click `start.bat`. Set `claude_launch_args` to `--continue` (in the dashboard
+Settings) and the Claude terminal will automatically resume the **most recent
+conversation in your `work_dir`** -- exactly the one that hit the limit. Use
+`--resume` instead if you want a picker of recent conversations.
 
 **The dashboard says "No interactive session found".**
 Claude is not running inside tmux. Run `tmux new -A -s claude-work claude` (or

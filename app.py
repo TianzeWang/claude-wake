@@ -21,6 +21,7 @@ Just run:  python3 app.py   then open http://localhost:<port> in a browser.
 Usually launched in one click by start.bat / start.sh in the same folder.
 """
 
+import base64
 import datetime as _dt
 import json
 import os
@@ -29,7 +30,6 @@ import subprocess
 import threading
 import time
 import urllib.parse
-import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 __version__ = "1.0.0"
@@ -51,8 +51,6 @@ DEFAULT_CONFIG = {
     "done_marker": "ALL_DONE",
     "poll_sec": 30,                    # polling interval
     "buffer_sec": 60,                  # extra seconds to wait past the reset moment (safety margin)
-    "telegram_bot_token": "",          # set both to enable Telegram notifications
-    "telegram_chat_id": "",
     "default_until": "08:00",          # default value of the dashboard "stop at" control
     "default_max_rounds": 0,           # 0 = unlimited rounds
     "lang": "en",                      # notification language: "en" or "zh"
@@ -87,20 +85,26 @@ STRINGS = {
         "notify_stopped_body": "{reason} (resumed {rounds} round(s))",
         "test_notify_title": "Claude Wake test notification",
         "test_notify_body": "If you can see this, the notification path works.",
+        "notify_reset_title": "Claude quota restored",
+        "notify_reset_body": "Will send 'continue' in {m} min. Open the dashboard to continue now or stop.",
         "reason_until": "Reached stop time {t}",
         "reason_rounds": "Resumed {n} round(s), limit reached",
         "reason_done": "Detected done marker {m}, work complete",
         "reason_manual": "Stopped manually",
+        "reason_user": "You chose to take over manually",
     },
     "zh": {
         "notify_stopped_title": "Claude Wake 已停止",
         "notify_stopped_body": "{reason}（共续 {rounds} 轮）",
         "test_notify_title": "Claude Wake 测试通知",
         "test_notify_body": "如果你看到这条，说明通知通路正常。",
+        "notify_reset_title": "Claude 额度已恢复",
+        "notify_reset_body": "{m} 分钟后将自动让 Claude 继续。打开控制台可立即继续或叫停。",
         "reason_until": "到达停点 {t}",
         "reason_rounds": "已续够 {n} 轮",
         "reason_done": "检测到完成标记 {m}，工作完成",
         "reason_manual": "手动停止",
+        "reason_user": "你选择了自己接手",
     },
 }
 
@@ -294,36 +298,66 @@ def send_continue(name, text):
 # ---------------------------------------------------------------------------
 # Notifications
 # ---------------------------------------------------------------------------
+def _is_wsl():
+    """True when running inside WSL (where notify-send usually has no daemon to talk to)."""
+    try:
+        with open("/proc/version", "r", encoding="utf-8", errors="replace") as f:
+            return "microsoft" in f.read().lower()
+    except Exception:
+        return False
+
+
+def _xml_escape(s):
+    return (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+             .replace('"', "&quot;").replace("'", "&apos;"))
+
+
+# A real Windows toast via the WinRT API. The AppId below is the well-known
+# PowerShell AppUserModelID -- required for unpackaged apps to show toasts.
+_TOAST_PS_TEMPLATE = r"""
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType=WindowsRuntime] | Out-Null
+[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType=WindowsRuntime] | Out-Null
+$xml = New-Object Windows.Data.Xml.Dom.XmlDocument
+$xml.LoadXml('<toast><visual><binding template="ToastText02"><text id="1">__TITLE__</text><text id="2">__BODY__</text></binding></visual></toast>')
+$toast = New-Object Windows.UI.Notifications.ToastNotification $xml
+$appid = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe'
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($appid).Show($toast)
+"""
+
+
+def _windows_toast(title, msg):
+    """Show a real Windows toast through powershell.exe (works from inside WSL)."""
+    ps = (_TOAST_PS_TEMPLATE
+          .replace("__TITLE__", _xml_escape(title))
+          .replace("__BODY__", _xml_escape(msg)))
+    # -EncodedCommand sidesteps every cmd/bash quoting pitfall (UTF-16LE base64).
+    # capture as BYTES: on localized Windows, powershell's console output is not
+    # UTF-8 (e.g. GBK) and text-mode decoding would raise, masking a successful run.
+    b64 = base64.b64encode(ps.encode("utf-16-le")).decode("ascii")
+    try:
+        r = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", b64],
+            capture_output=True, timeout=25)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
 def notify(cfg, title, msg):
-    full = f"{title}\n{msg}"
-    # 1) Telegram
-    token = cfg.get("telegram_bot_token", "").strip()
-    chat = cfg.get("telegram_chat_id", "").strip()
-    if token and chat:
-        try:
-            data = urllib.parse.urlencode({"chat_id": chat, "text": full}).encode()
-            url = f"https://api.telegram.org/bot{token}/sendMessage"
-            urllib.request.urlopen(urllib.request.Request(url, data=data), timeout=10)
-            return
-        except Exception as e:
-            print(f"[warn] Telegram notification failed: {e}")
-    # 2) Linux desktop notification
+    """Best-effort desktop notification.
+    Order: WSL -> Windows toast (notify-send is usually a no-op there),
+    then Linux notify-send, macOS osascript, Windows toast as final fallback."""
+    if _is_wsl() and _windows_toast(title, msg):
+        return
     if _run(["which", "notify-send"]).returncode == 0:
         _run(["notify-send", title, msg])
         return
-    # 3) macOS notification (osascript)
     if _run(["which", "osascript"]).returncode == 0:
         safe_msg = msg.replace('"', "'")
         safe_title = title.replace('"', "'")
         _run(["osascript", "-e", f'display notification "{safe_msg}" with title "{safe_title}"'])
         return
-    # 4) Windows toast (via powershell.exe)
-    ps = (
-        "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, "
-        "ContentType=WindowsRuntime] | Out-Null; "
-        "Write-Host '" + full.replace("'", " ") + "'"
-    )
-    _run(["powershell.exe", "-NoProfile", "-Command", ps])
+    _windows_toast(title, msg)
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +369,8 @@ class Watcher:
         self._thread = None
         self._stop = threading.Event()      # set => stop requested
         self._wake = threading.Event()      # used for interruptible sleep
+        self._confirm = threading.Event()   # set => user answered the confirm prompt
+        self._confirm_action = None         # "continue" | "stop"
         self.lock = threading.Lock()
         self.reset_state()
 
@@ -348,6 +384,7 @@ class Watcher:
         self.max_rounds = 0
         self.drive = False
         self.do_notify = True
+        self.confirm_sec = 0                 # >0 => after reset, notify and wait this long before continuing
         self.started_at = 0
         self.last_event = ""
 
@@ -473,6 +510,25 @@ class Watcher:
                     break  # interrupted by stop
                 if self._stop.is_set():
                     break
+                # -- optional confirm window: notify first, give the user time to decide --
+                if self.confirm_sec > 0:
+                    if self.do_notify:
+                        notify(cfg, L(cfg, "notify_reset_title"),
+                               L(cfg, "notify_reset_body", m=max(1, self.confirm_sec // 60)))
+                    self._confirm_action = None
+                    self._confirm.clear()
+                    self._set(state="waiting_confirm",
+                              detail={"code": "confirm_wait"},
+                              reset_epoch=int(time.time()) + self.confirm_sec,
+                              reset_total_sec=self.confirm_sec)
+                    self._log(f"quota restored; waiting {self.confirm_sec}s for user decision")
+                    self._confirm.wait(timeout=self.confirm_sec)
+                    if self._stop.is_set():
+                        break
+                    if self._confirm_action == "stop":
+                        stop_with({"code": "stopped_user"}, L(cfg, "reason_user"))
+                        return
+                    # timeout or explicit "continue" -> proceed
                 ok, err = send_continue(sess, cont_text)
                 self._set(reset_epoch=0, reset_total_sec=0)
                 if ok:
@@ -514,11 +570,13 @@ class Watcher:
         return True
 
     # ---- Control ----
-    def start(self, until, max_rounds, drive, do_notify):
+    def start(self, until, max_rounds, drive, do_notify, confirm_sec=0):
         if self._thread and self._thread.is_alive():
             return False, "already running"
         self._stop.clear()
         self._wake.clear()
+        self._confirm.clear()
+        self._confirm_action = None
         with self.lock:
             self.rounds = 0
             self.reset_epoch = 0
@@ -527,6 +585,7 @@ class Watcher:
             self.max_rounds = int(max_rounds or 0)
             self.drive = bool(drive)
             self.do_notify = bool(do_notify)
+            self.confirm_sec = max(0, int(confirm_sec or 0))
             self.started_at = int(time.time())
             self.last_event = ""
         self._thread = threading.Thread(target=self._loop, daemon=True)
@@ -536,7 +595,16 @@ class Watcher:
     def stop(self):
         self._stop.set()
         self._wake.set()
+        self._confirm.set()
         return True, "stop requested"
+
+    def confirm(self, action):
+        """Resolve the confirm window: action is 'continue' or 'stop'."""
+        if self.state != "waiting_confirm":
+            return False, "not waiting for confirmation"
+        self._confirm_action = "stop" if action == "stop" else "continue"
+        self._confirm.set()
+        return True, self._confirm_action
 
 
 # ---------------------------------------------------------------------------
@@ -548,8 +616,7 @@ CFG = None
 # Fields a client may set via POST /config.
 CONFIG_WHITELIST = {
     "tmux_session", "work_dir", "claude_launch_args", "continue_text", "done_marker",
-    "poll_sec", "buffer_sec", "telegram_bot_token", "telegram_chat_id",
-    "default_until", "default_max_rounds", "lang", "port",
+    "poll_sec", "buffer_sec", "default_until", "default_max_rounds", "lang", "port",
 }
 CONFIG_INT_FIELDS = {"poll_sec", "buffer_sec", "default_max_rounds", "port"}
 
@@ -584,7 +651,6 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, json.dumps(WATCHER.status(), ensure_ascii=False))
         elif path == "/config":
             safe = dict(CFG)
-            safe["telegram_bot_token"] = "***" if safe.get("telegram_bot_token") else ""
             safe["version"] = __version__
             self._send(200, json.dumps(safe, ensure_ascii=False))
         else:
@@ -602,15 +668,23 @@ class Handler(BaseHTTPRequestHandler):
                 params = {k: v[0] for k, v in urllib.parse.parse_qs(raw).items()}
 
         if path == "/start":
+            try:
+                confirm_sec = int(params.get("confirm_sec", 0) or 0)
+            except Exception:
+                confirm_sec = 0
             ok, msg = WATCHER.start(
                 until=str(params.get("until", "")).strip(),
                 max_rounds=params.get("max_rounds", 0),
                 drive=params.get("drive", False) in (True, "true", "1", "on", 1),
                 do_notify=params.get("notify", True) not in (False, "false", "0", "off", 0),
+                confirm_sec=confirm_sec,
             )
             self._send(200, json.dumps({"ok": ok, "msg": msg}, ensure_ascii=False))
         elif path == "/stop":
             ok, msg = WATCHER.stop()
+            self._send(200, json.dumps({"ok": ok, "msg": msg}, ensure_ascii=False))
+        elif path == "/confirm":
+            ok, msg = WATCHER.confirm(str(params.get("action", "continue")))
             self._send(200, json.dumps({"ok": ok, "msg": msg}, ensure_ascii=False))
         elif path == "/config":
             self._handle_config_post(params)
@@ -633,9 +707,6 @@ class Handler(BaseHTTPRequestHandler):
             if key not in params:
                 continue
             val = params[key]
-            # token == "***" means keep the existing value (the UI masks it)
-            if key == "telegram_bot_token" and val == "***":
-                continue
             if key in CONFIG_INT_FIELDS:
                 try:
                     val = int(val)

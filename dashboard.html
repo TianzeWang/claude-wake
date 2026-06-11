@@ -196,6 +196,10 @@
         <div class="cd"><div class="t" id="countdown">--:--:--</div>
           <div class="l" id="cdLabel"></div></div>
       </div>
+      <div class="btns" id="confirmBtns" style="display:none;width:100%;max-width:360px">
+        <button class="btn start" id="confirmGo" onclick="doConfirm('continue')"></button>
+        <button class="btn stop" id="confirmStop" onclick="doConfirm('stop')"></button>
+      </div>
     </div>
 
     <div class="metrics">
@@ -214,6 +218,17 @@
     <div class="toggle-row">
       <span class="lab" id="lab_notify"></span>
       <label class="sw"><input type="checkbox" id="notify" checked><span class="sl"></span></label>
+    </div>
+    <div class="toggle-row">
+      <span class="lab">
+        <span id="lab_confirm"></span>
+        <span class="info" id="confirmInfo" title="">i</span>
+      </span>
+      <label class="sw"><input type="checkbox" id="confirmWait" onchange="confirmRowUI()"><span class="sl"></span></label>
+    </div>
+    <div id="confirmMinRow" style="display:none">
+      <label id="lab_confirm_min" style="margin-top:8px"></label>
+      <input type="number" id="confirmMin" value="5" min="1" max="120">
     </div>
     <div class="toggle-row">
       <span class="lab">
@@ -271,8 +286,6 @@
   <label id="set_done"></label><input type="text" id="cfg_done_marker">
   <label id="set_poll"></label><input type="number" id="cfg_poll_sec" min="1">
   <label id="set_buffer"></label><input type="number" id="cfg_buffer_sec" min="0">
-  <label id="set_token"></label><input type="password" id="cfg_telegram_bot_token">
-  <label id="set_chat"></label><input type="text" id="cfg_telegram_chat_id">
   <label id="set_lang"></label>
   <select id="cfg_lang"><option value="en">English</option><option value="zh">中文</option></select>
   <div class="fhint" id="set_lang_hint"></div>
@@ -293,19 +306,26 @@ const STR = {
     tagline: "Auto-resume Claude Code after the 5-hour usage limit resets.",
     tmuxWarn: (s) => `No interactive session found (tmux <b>${s}</b>). Start Claude inside tmux: <code>tmux new -A -s ${s} claude</code>`,
     st_stopped:"Stopped", st_running:"Running", st_waiting:"Waiting for reset",
+    st_confirm:"Quota restored — your call",
     d_not_started:"Not started yet",
     d_watching:"Watching the session (waiting for a limit hit or progress)",
     d_reset_at:(t)=>`Resets at ${t}, will continue automatically`,
+    d_confirm_wait:"Quota restored. Continuing automatically when the countdown ends — or decide below.",
     d_continue_sent:"Sent 'continue', Claude is working",
     d_continue_failed:(e)=>`Failed to send 'continue': ${e}`,
     d_stopped_until:(t)=>`Reached stop time ${t}`,
     d_stopped_rounds:(n)=>`Resumed ${n} round(s), limit reached`,
     d_stopped_done:(m)=>`Detected done marker ${m}, work complete`,
     d_stopped_manual:"Stopped manually",
+    d_stopped_user:"Stopped — you chose to take over",
     m_rounds:"Rounds resumed", m_until:"Stop at", m_event:"Last event",
-    cd_label:"until reset", none:"No limit",
+    cd_label:"until reset", cd_label_confirm:"until auto-continue", none:"No limit",
+    confirm_go:"Continue now", confirm_stop:"Stop, I'll take over",
     lab_stopat:"When should it stop?",
     lab_notify:"Notify me when it stops",
+    lab_confirm:"Remind me first, wait before continuing",
+    confirmTip:"When the quota is restored, send a notification first and wait N minutes. If you do nothing, it continues automatically; in the dashboard you can continue immediately or stop and take over yourself.",
+    lab_confirm_min:"Wait how many minutes before auto-continuing?",
     lab_drive:"Drive mode (more aggressive)",
     driveTip:"Even without a limit hit, re-sends 'continue' after each natural turn end to push more rounds. Uses more quota; only stops on ALL_DONE.",
     lab_maxrounds:"Stop after at most N rounds (0 = unlimited)",
@@ -319,7 +339,6 @@ const STR = {
     set_tmux:"tmux session name", set_workdir:"Working directory (locates the transcript)",
     set_args:"Claude launch args", set_continue:"Continue text",
     set_done:"Done marker", set_poll:"Poll interval (sec)", set_buffer:"Buffer after reset (sec)",
-    set_token:"Telegram bot token", set_chat:"Telegram chat id",
     set_lang:"Notification language", set_lang_hint:"Language used in notifications and stop reasons.",
     set_port:"Port", set_port_hint:"Changing the port requires a backend restart.",
     set_save:"Save", set_apply_hint:"Watcher settings (poll, buffer, continue text, etc.) take effect on the next Start.",
@@ -334,19 +353,26 @@ const STR = {
     tagline: "5 小时额度恢复后，自动叫醒 Claude Code 接着干。",
     tmuxWarn: (s) => `没找到交互会话（tmux <b>${s}</b>）。请在 tmux 里启动 Claude：<code>tmux new -A -s ${s} claude</code>`,
     st_stopped:"已停止", st_running:"运行中", st_waiting:"等待额度恢复",
+    st_confirm:"额度已恢复 — 等你决定",
     d_not_started:"尚未启动",
     d_watching:"正在监视会话（等待撞限或工作进展）",
     d_reset_at:(t)=>`恢复时间 ${t}，到点自动续`,
+    d_confirm_wait:"额度已恢复。倒计时结束将自动继续——也可以现在就做决定。",
     d_continue_sent:"已送『继续』，Claude 接着干",
     d_continue_failed:(e)=>`送『继续』失败：${e}`,
     d_stopped_until:(t)=>`到达停点 ${t}`,
     d_stopped_rounds:(n)=>`已续够 ${n} 轮`,
     d_stopped_done:(m)=>`检测到完成标记 ${m}，工作完成`,
     d_stopped_manual:"手动停止",
+    d_stopped_user:"已停止 — 你选择了自己接手",
     m_rounds:"已续轮数", m_until:"停点", m_event:"最近事件",
-    cd_label:"距恢复", none:"不限",
+    cd_label:"距恢复", cd_label_confirm:"距自动继续", none:"不限",
+    confirm_go:"立即继续", confirm_stop:"停下，我来接手",
     lab_stopat:"几点自动停止？",
     lab_notify:"停止时通知我",
+    lab_confirm:"恢复后先提醒，等我确认",
+    confirmTip:"额度恢复时先发通知并等待 N 分钟：期间不操作则自动继续；在控制台可选择「立即继续」或「停下我来接手」。",
+    lab_confirm_min:"等待多少分钟后自动继续？",
     lab_drive:"drive 模式（更激进）",
     driveTip:"即使没撞限，每当 Claude 一轮自然结束也补送『继续』，持续推进多轮。更费额度，只靠 ALL_DONE 才停。",
     lab_maxrounds:"最多续多少轮后兜底停止？（0 = 不限）",
@@ -360,7 +386,6 @@ const STR = {
     set_tmux:"tmux 会话名", set_workdir:"工作目录（用于定位会话记录）",
     set_args:"Claude 启动参数", set_continue:"续跑文本",
     set_done:"完成标记", set_poll:"轮询间隔（秒）", set_buffer:"恢复后缓冲（秒）",
-    set_token:"Telegram bot token", set_chat:"Telegram chat id",
     set_lang:"通知语言", set_lang_hint:"通知与停止原因所用的语言。",
     set_port:"端口", set_port_hint:"修改端口需重启后端。",
     set_save:"保存", set_apply_hint:"看门狗设置（轮询、缓冲、续跑文本等）在下次「开始」时生效。",
@@ -527,19 +552,23 @@ function detailText(d){
     case "not_started": return t.d_not_started;
     case "watching": return t.d_watching;
     case "reset_at": return t.d_reset_at(d.t);
+    case "confirm_wait": return t.d_confirm_wait;
     case "continue_sent": return t.d_continue_sent;
     case "continue_failed": return t.d_continue_failed(d.err);
     case "stopped_until": return t.d_stopped_until(d.t);
     case "stopped_rounds": return t.d_stopped_rounds(d.n);
     case "stopped_done": return t.d_stopped_done(d.m);
     case "stopped_manual": return t.d_stopped_manual;
+    case "stopped_user": return t.d_stopped_user;
     default: return "";
   }
 }
 function render(s){
   const t=T();
-  const stateMap={stopped:t.st_stopped, running:t.st_running, waiting_reset:t.st_waiting};
-  const colorMap={stopped:"var(--grey)", running:"var(--green)", waiting_reset:"var(--amber)"};
+  const stateMap={stopped:t.st_stopped, running:t.st_running, waiting_reset:t.st_waiting,
+                  waiting_confirm:t.st_confirm};
+  const colorMap={stopped:"var(--grey)", running:"var(--green)", waiting_reset:"var(--amber)",
+                  waiting_confirm:"var(--accent2)"};
   document.getElementById("state").textContent = stateMap[s.state]||s.state||"—";
   document.getElementById("detail").textContent = detailText(s.detail);
   document.getElementById("dot").style.background = colorMap[s.state]||"var(--grey)";
@@ -555,13 +584,18 @@ function render(s){
   document.getElementById("stopBtn").disabled = !s.running;
 
   const rw=document.getElementById("ringwrap");
-  if(s.state==="waiting_reset" && s.reset_eta_sec>0){
+  const waiting = (s.state==="waiting_reset" || s.state==="waiting_confirm");
+  if(waiting && s.reset_eta_sec>0){
     resetTargetEpoch = Date.now()+s.reset_eta_sec*1000;
     resetTotalSec = s.reset_total_sec>0 ? s.reset_total_sec : s.reset_eta_sec;
     rw.style.display="flex";
   } else {
     resetTargetEpoch=0; resetTotalSec=0; rw.style.display="none";
   }
+  document.getElementById("cdLabel").textContent =
+    s.state==="waiting_confirm" ? t.cd_label_confirm : t.cd_label;
+  document.getElementById("confirmBtns").style.display =
+    s.state==="waiting_confirm" ? "flex" : "none";
 }
 const RING_C = 2*Math.PI*74;
 function tick(){
@@ -578,17 +612,29 @@ function tick(){
 
 /* ---------- actions ---------- */
 async function doStart(){
+  const cw = document.getElementById("confirmWait").checked;
+  const cm = parseInt(document.getElementById("confirmMin").value||"5",10);
   const body={
     until: untilValue,
     max_rounds: parseInt(document.getElementById("maxRounds").value||"0",10),
     drive: document.getElementById("drive").checked,
     notify: document.getElementById("notify").checked,
+    confirm_sec: cw ? Math.max(60, cm*60) : 0,
   };
   await fetch("/start",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify(body)});
   toast(T().started); refresh();
 }
 async function doStop(){ await fetch("/stop",{method:"POST"}); toast(T().stopped); refresh(); }
+async function doConfirm(action){
+  await fetch("/confirm",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({action})});
+  refresh();
+}
+function confirmRowUI(){
+  document.getElementById("confirmMinRow").style.display =
+    document.getElementById("confirmWait").checked ? "block" : "none";
+}
 async function testBtn(url){
   const r=await fetch(url,{method:"POST"}); const j=await r.json();
   toast(j.msg||(j.ok?T().sent:"failed"));
@@ -604,9 +650,6 @@ async function openDrawer(){
   document.getElementById("cfg_done_marker").value=c.done_marker||"";
   document.getElementById("cfg_poll_sec").value=c.poll_sec ?? 30;
   document.getElementById("cfg_buffer_sec").value=c.buffer_sec ?? 60;
-  const tk=document.getElementById("cfg_telegram_bot_token");
-  tk.value=""; tk.placeholder = c.telegram_bot_token==="***" ? "*** (set)" : "";
-  document.getElementById("cfg_telegram_chat_id").value=c.telegram_chat_id||"";
   document.getElementById("cfg_lang").value=c.lang||"en";
   document.getElementById("cfg_port").value=c.port ?? 8770;
   document.getElementById("drawer").classList.add("on");
@@ -617,7 +660,6 @@ function closeDrawer(){
   document.getElementById("drawerOverlay").classList.remove("on");
 }
 async function saveConfig(){
-  const tkEl=document.getElementById("cfg_telegram_bot_token");
   const body={
     tmux_session:document.getElementById("cfg_tmux_session").value,
     work_dir:document.getElementById("cfg_work_dir").value,
@@ -626,13 +668,9 @@ async function saveConfig(){
     done_marker:document.getElementById("cfg_done_marker").value,
     poll_sec:parseInt(document.getElementById("cfg_poll_sec").value||"30",10),
     buffer_sec:parseInt(document.getElementById("cfg_buffer_sec").value||"60",10),
-    telegram_chat_id:document.getElementById("cfg_telegram_chat_id").value,
     lang:document.getElementById("cfg_lang").value,
     port:parseInt(document.getElementById("cfg_port").value||"8770",10),
   };
-  // empty input + a stored token => keep existing via "***"; otherwise send literal (incl. "")
-  if(tkEl.value==="" && tkEl.placeholder.startsWith("***")) body.telegram_bot_token="***";
-  else body.telegram_bot_token=tkEl.value;
   const r=await fetch("/config",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify(body)});
   const j=await r.json();
@@ -650,6 +688,11 @@ function applyLabels(){
   document.getElementById("cdLabel").textContent=t.cd_label;
   document.getElementById("lab_stopat").textContent=t.lab_stopat;
   document.getElementById("lab_notify").textContent=t.lab_notify;
+  document.getElementById("lab_confirm").textContent=t.lab_confirm;
+  document.getElementById("confirmInfo").title=t.confirmTip;
+  document.getElementById("lab_confirm_min").textContent=t.lab_confirm_min;
+  document.getElementById("confirmGo").textContent=t.confirm_go;
+  document.getElementById("confirmStop").textContent=t.confirm_stop;
   document.getElementById("lab_drive").textContent=t.lab_drive;
   document.getElementById("driveInfo").title=t.driveTip;
   document.getElementById("lab_maxrounds").textContent=t.lab_maxrounds;
@@ -671,8 +714,6 @@ function applyLabels(){
   document.getElementById("set_done").textContent=t.set_done;
   document.getElementById("set_poll").textContent=t.set_poll;
   document.getElementById("set_buffer").textContent=t.set_buffer;
-  document.getElementById("set_token").textContent=t.set_token;
-  document.getElementById("set_chat").textContent=t.set_chat;
   document.getElementById("set_lang").textContent=t.set_lang;
   document.getElementById("set_lang_hint").textContent=t.set_lang_hint;
   document.getElementById("set_port").textContent=t.set_port;
