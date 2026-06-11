@@ -26,6 +26,7 @@ import datetime as _dt
 import json
 import os
 import re
+import secrets
 import subprocess
 import threading
 import time
@@ -47,6 +48,7 @@ DEFAULT_CONFIG = {
     "tmux_session": "claude-work",     # name of the tmux session running interactive Claude
     "work_dir": "",                    # Claude's working dir (used to locate the transcript); empty = scan all projects, newest wins
     "claude_launch_args": "",          # extra args appended to `claude` when launched by start_claude.sh
+    "foreground_commands": ["node", "claude", "npx", "tsx", "bun", "deno"],  # only inject keys when the pane's foreground process matches one of these; otherwise skip (claude crashed / pane at a shell / switched away)
     "continue_text": "Continue the unfinished work. If everything is already done, output a single line at the end of your reply: ALL_DONE",
     "done_marker": "ALL_DONE",
     "poll_sec": 30,                    # polling interval
@@ -283,11 +285,77 @@ def tmux_capture(name):
     return r.stdout if r.returncode == 0 else ""
 
 
-def send_continue(name, text):
+def _tmux_pane_pid(name):
+    r = _run(["tmux", "display-message", "-p", "-t", name, "#{pane_pid}"])
+    s = (r.stdout or "").strip()
+    return int(s) if (r.returncode == 0 and s.isdigit()) else None
+
+
+def _foreground_comms(root_pid):
+    """Command basenames of every terminal-foreground process (the '+' flag in `ps stat`)
+    inside root_pid's process subtree. Returns a list, or None if the snapshot failed.
+    We walk the subtree by ppid because on macOS tmux's #{pane_current_command} reports the
+    shell instead of the child, so the '+' flag (matching auto-retry's `ps -o stat=`) is the
+    reliable signal for what is actually running in the pane right now."""
+    r = _run(["ps", "-axo", "pid=,ppid=,stat=,comm="])
+    if r.returncode != 0:
+        return None
+    info, children = {}, {}
+    for line in (r.stdout or "").splitlines():
+        parts = line.split(None, 3)
+        if len(parts) < 4:
+            continue
+        try:
+            pid, ppid = int(parts[0]), int(parts[1])
+        except ValueError:
+            continue
+        info[pid] = (parts[2], parts[3])           # (stat, comm)
+        children.setdefault(ppid, []).append(pid)
+    fg, seen, stack = [], set(), [root_pid]
+    while stack:
+        pid = stack.pop()
+        if pid in seen:
+            continue
+        seen.add(pid)
+        rec = info.get(pid)
+        if rec and "+" in rec[0]:
+            fg.append(os.path.basename(rec[1].lstrip("-")))   # '-zsh' -> 'zsh', '/path/to/node' -> 'node'
+        stack.extend(children.get(pid, []))
+    return fg
+
+
+def pane_foreground_ok(name, fg_commands=None):
+    """Decide whether the pane's foreground process looks like Claude before we inject keys.
+      True  -> a foreground process matches fg_commands (safe to send)
+      False -> the foreground process is clearly something else (shell prompt, editor, ...); skip
+      None  -> could not determine (proceed, but the caller may warn)
+    The second value is a short description of what we saw, for logging."""
+    cmds = [str(c).lower() for c in (fg_commands or []) if str(c).strip()]
+    if not cmds:
+        cmds = [c.lower() for c in DEFAULT_CONFIG["foreground_commands"]]
+    pid = _tmux_pane_pid(name)
+    if pid is None:
+        return None, "pane pid unknown"
+    fg = _foreground_comms(pid)
+    if fg is None:
+        return None, "process snapshot unavailable"
+    if not fg:
+        return None, "no foreground process found"
+    if any(any(want in got.lower() for want in cmds) for got in fg):
+        return True, ",".join(fg)
+    return False, ",".join(fg)
+
+
+def send_continue(name, text, fg_commands=None):
     """Type the continue text into the tmux session and press Enter (text and Enter sent
-    as two separate send-keys to avoid escaping pitfalls)."""
+    as two separate send-keys to avoid escaping pitfalls).
+    Refuses to send when the pane's foreground process is clearly not Claude, so a long
+    `continue` instruction is never typed into a shell / editor (e.g. after Claude crashed)."""
     if not tmux_session_exists(name):
         return False, f"tmux session '{name}' not found"
+    fg_ok, fg_info = pane_foreground_ok(name, fg_commands)
+    if fg_ok is False:
+        return False, f"foreground process is '{fg_info}', not Claude; skipped send-keys"
     r1 = _run(["tmux", "send-keys", "-t", name, "--", text])
     time.sleep(0.3)
     r2 = _run(["tmux", "send-keys", "-t", name, "Enter"])
@@ -529,7 +597,7 @@ class Watcher:
                         stop_with({"code": "stopped_user"}, L(cfg, "reason_user"))
                         return
                     # timeout or explicit "continue" -> proceed
-                ok, err = send_continue(sess, cont_text)
+                ok, err = send_continue(sess, cont_text, cfg.get("foreground_commands"))
                 self._set(reset_epoch=0, reset_total_sec=0)
                 if ok:
                     self.rounds += 1
@@ -544,7 +612,7 @@ class Watcher:
 
             # -- (3) drive mode: idle and not at the limit -> nudge with continue to push more rounds --
             if self.drive and self._looks_idle(pane):
-                ok, err = send_continue(sess, cont_text)
+                ok, err = send_continue(sess, cont_text, cfg.get("foreground_commands"))
                 if ok:
                     self.rounds += 1
                     self._log(f"drive continue (round {self.rounds})")
@@ -613,12 +681,20 @@ class Watcher:
 WATCHER = None
 CFG = None
 
+# A per-process secret. The dashboard reads it from its own (same-origin) HTML and echoes it
+# back as the X-CSRF-Token header on every POST; a cross-site page cannot read it, so it cannot
+# forge a valid state-changing request to this localhost server.
+CSRF_TOKEN = secrets.token_urlsafe(32)
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
 # Fields a client may set via POST /config.
 CONFIG_WHITELIST = {
-    "tmux_session", "work_dir", "claude_launch_args", "continue_text", "done_marker",
+    "tmux_session", "work_dir", "claude_launch_args", "foreground_commands",
+    "continue_text", "done_marker",
     "poll_sec", "buffer_sec", "default_until", "default_max_rounds", "lang", "port",
 }
 CONFIG_INT_FIELDS = {"poll_sec", "buffer_sec", "default_max_rounds", "port"}
+CONFIG_LIST_FIELDS = {"foreground_commands"}
 
 
 def save_config(cfg):
@@ -638,12 +714,27 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _csrf_ok(self):
+        """Reject cross-site POSTs. Two independent checks (the attacker must defeat both):
+        1) when the browser sends Origin/Referer, its host must be loopback;
+        2) the request must carry the per-process CSRF token in X-CSRF-Token. A foreign page
+           cannot read our same-origin HTML, so it cannot learn the token, and browsers forbid
+           setting a custom header on a cross-site request without a CORS preflight we never grant."""
+        for hdr in ("Origin", "Referer"):
+            val = self.headers.get(hdr)
+            if val:
+                host = urllib.parse.urlparse(val).hostname
+                if host is not None and host not in _LOOPBACK_HOSTS:
+                    return False
+                break  # Origin is authoritative; only fall through to Referer when Origin is absent
+        return secrets.compare_digest(self.headers.get("X-CSRF-Token", ""), CSRF_TOKEN)
+
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
         if path in ("/", "/index.html", "/dashboard.html"):
             try:
                 with open(DASHBOARD_PATH, "r", encoding="utf-8") as f:
-                    html = f.read()
+                    html = f.read().replace("__CSRF_TOKEN__", CSRF_TOKEN)
             except Exception as e:
                 html = f"<h1>failed to read dashboard.html: {e}</h1>"
             self._send(200, html, "text/html; charset=utf-8")
@@ -658,6 +749,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urllib.parse.urlparse(self.path).path
+        if not self._csrf_ok():
+            self._send(403, json.dumps({"ok": False, "msg": "CSRF check failed"}))
+            return
         length = int(self.headers.get("Content-Length", 0) or 0)
         raw = self.rfile.read(length).decode("utf-8") if length else ""
         params = {}
@@ -690,7 +784,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_config_post(params)
         elif path == "/test-continue":
             # debug: immediately inject the continue text once, to verify the injection path works
-            ok, err = send_continue(CFG.get("tmux_session", ""), CFG.get("continue_text", "continue"))
+            ok, err = send_continue(CFG.get("tmux_session", ""), CFG.get("continue_text", "continue"),
+                                    CFG.get("foreground_commands"))
             self._send(200, json.dumps({"ok": ok, "msg": err or "sent"}, ensure_ascii=False))
         elif path == "/test-notify":
             notify(CFG, L(CFG, "test_notify_title"), L(CFG, "test_notify_body"))
@@ -711,6 +806,12 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     val = int(val)
                 except Exception:
+                    continue
+            elif key in CONFIG_LIST_FIELDS:
+                if not isinstance(val, list):
+                    continue
+                val = [str(x) for x in val if str(x).strip()]
+                if not val:
                     continue
             CFG[key] = val  # mutate CFG in place so the Watcher (which shares the ref) sees it
         try:
