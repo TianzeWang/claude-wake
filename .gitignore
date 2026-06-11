@@ -1,0 +1,5 @@
+config.json
+logs/
+启动.bat
+__pycache__/
+*.pyc

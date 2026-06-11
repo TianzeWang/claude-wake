@@ -1,0 +1,15 @@
+{
+  "port": 8770,
+  "tmux_session": "claude-work",
+  "work_dir": "",
+  "claude_launch_args": "",
+  "continue_text": "Continue the unfinished work. If everything is already done, output a single line at the end of your reply: ALL_DONE",
+  "done_marker": "ALL_DONE",
+  "poll_sec": 30,
+  "buffer_sec": 60,
+  "telegram_bot_token": "",
+  "telegram_chat_id": "",
+  "default_until": "08:00",
+  "default_max_rounds": 0,
+  "lang": "en"
+}

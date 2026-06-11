@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Wake</title>
+<style>
+  :root{
+    --bg:#0d1117; --card:#161b22; --card2:#0d1117; --line:#272e38;
+    --fg:#e6edf3; --muted:#8b98a5; --muted2:#6b7682;
+    --accent:#7c5cff; --accent2:#9d86ff;
+    --green:#3fb950; --amber:#d29922; --red:#f85149; --grey:#6b7682;
+    --shadow:0 8px 28px rgba(0,0,0,.45);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    font-family:-apple-system,"Segoe UI","Microsoft YaHei",Roboto,sans-serif;
+    background:radial-gradient(1200px 600px at 50% -10%,#1a2030 0%,var(--bg) 60%);
+    color:var(--fg); min-height:100vh; padding:24px 16px 60px;
+    display:flex; justify-content:center;
+  }
+  .wrap{width:100%; max-width:600px}
+  .topbar{display:flex; align-items:center; justify-content:space-between; margin-bottom:20px}
+  .brand{display:flex; align-items:center; gap:12px}
+  .logo{width:38px;height:38px;border-radius:11px;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));
+    display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:var(--shadow)}
+  h1{font-size:20px;font-weight:700;margin:0;letter-spacing:.2px}
+  .tagline{color:var(--muted);font-size:12.5px;margin-top:2px}
+  .topbtns{display:flex;gap:8px}
+  .iconbtn{background:var(--card);border:1px solid var(--line);color:var(--fg);
+    border-radius:10px;padding:7px 11px;font-size:13px;cursor:pointer;transition:.15s}
+  .iconbtn:hover{border-color:var(--accent);color:var(--accent2)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:22px;margin-bottom:16px;box-shadow:var(--shadow)}
+  .warn{background:#2d1e12;border:1px solid #5a3a1a;color:#e0a060;font-size:13px;
+    padding:11px 14px;border-radius:12px;margin-bottom:16px;display:none}
+  .warn code{background:#00000040;padding:2px 6px;border-radius:5px}
+
+  /* status card */
+  .stathead{display:flex;align-items:center;gap:10px}
+  .dot{width:11px;height:11px;border-radius:50%;background:var(--grey);
+    box-shadow:0 0 0 4px rgba(255,255,255,.04)}
+  .state-big{font-size:23px;font-weight:700}
+  .state-detail{color:var(--muted);font-size:13.5px;min-height:18px;margin-top:6px}
+  .ringwrap{display:none;flex-direction:column;align-items:center;margin:18px 0 6px}
+  .ring{position:relative;width:168px;height:168px}
+  .ring svg{transform:rotate(-90deg)}
+  .ring .cd{position:absolute;inset:0;display:flex;flex-direction:column;
+    align-items:center;justify-content:center}
+  .ring .cd .t{font-size:30px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--accent2)}
+  .ring .cd .l{font-size:11px;color:var(--muted);margin-top:2px;letter-spacing:.5px}
+  .metrics{display:flex;gap:12px;margin-top:18px;flex-wrap:wrap}
+  .metric{flex:1;min-width:150px;background:var(--card2);border:1px solid var(--line);
+    border-radius:12px;padding:12px 14px}
+  .metric .k{color:var(--muted2);font-size:11.5px}
+  .metric .v{font-size:17px;font-weight:600;margin-top:3px}
+
+  label{display:block;font-size:13px;color:#aeb9c4;margin:16px 0 8px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{background:var(--card2);border:1px solid var(--line);color:var(--fg);
+    border-radius:999px;padding:8px 14px;font-size:13px;cursor:pointer;transition:.13s}
+  .chip:hover{border-color:var(--accent)}
+  .chip.sel{background:linear-gradient(135deg,var(--accent),var(--accent2));
+    border-color:transparent;color:#fff;font-weight:600}
+  .preview{color:var(--accent2);font-size:13px;margin-top:10px;min-height:18px}
+
+  input[type=number],input[type=text],input[type=time],input[type=password],textarea,select{
+    width:100%;background:var(--card2);border:1px solid var(--line);color:var(--fg);
+    border-radius:9px;padding:10px 12px;font-size:14px;font-family:inherit}
+  textarea{resize:vertical;min-height:64px}
+
+  .toggle-row{display:flex;align-items:center;justify-content:space-between;margin:16px 0 4px}
+  .toggle-row .lab{font-size:14px;color:#cdd6df;display:flex;align-items:center;gap:7px}
+  .info{display:inline-flex;width:16px;height:16px;border-radius:50%;border:1px solid var(--muted);
+    color:var(--muted);font-size:11px;align-items:center;justify-content:center;cursor:help}
+  .sw{position:relative;width:46px;height:26px;flex:0 0 auto}
+  .sw input{opacity:0;width:0;height:0}
+  .sw .sl{position:absolute;inset:0;background:#30363d;border-radius:999px;transition:.2s;cursor:pointer}
+  .sw .sl:before{content:"";position:absolute;width:20px;height:20px;left:3px;top:3px;
+    background:#fff;border-radius:50%;transition:.2s}
+  .sw input:checked + .sl{background:linear-gradient(135deg,var(--accent),var(--accent2))}
+  .sw input:checked + .sl:before{transform:translateX(20px)}
+
+  .btns{display:flex;gap:12px;margin-top:22px}
+  .btn{flex:1;border:none;border-radius:12px;padding:15px;font-size:16px;font-weight:700;
+    cursor:pointer;transition:.15s}
+  .start{background:linear-gradient(135deg,var(--green),#2ea043);color:#fff}
+  .start:hover{filter:brightness(1.08)}
+  .stop{background:#30363d;color:#f0f3f6}
+  .stop:hover{background:#3d444d}
+  .btn:disabled{opacity:.4;cursor:not-allowed;filter:none}
+
+  details.adv{margin-top:4px}
+  details.adv summary{cursor:pointer;color:var(--muted);font-size:13px;padding:6px 0;list-style:none}
+  details.adv summary::-webkit-details-marker{display:none}
+  details.adv summary:before{content:"\25B8 ";color:var(--accent2)}
+  details.adv[open] summary:before{content:"\25BE "}
+  .tools{display:flex;gap:10px;margin-top:12px}
+  .tools button{flex:1;background:var(--card2);border:1px solid var(--line);color:var(--muted);
+    font-size:12.5px;font-weight:500;padding:9px;border-radius:9px;cursor:pointer}
+  .tools button:hover{border-color:var(--accent);color:var(--accent2)}
+
+  /* modal (clock dial) */
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;
+    align-items:center;justify-content:center;z-index:50;backdrop-filter:blur(3px)}
+  .overlay.on{display:flex}
+  .modal{background:var(--card);border:1px solid var(--line);border-radius:18px;
+    padding:22px;width:300px;box-shadow:var(--shadow)}
+  .modal h3{margin:0 0 4px;font-size:16px}
+  .modal .mp{font-size:13px;color:var(--muted);margin-bottom:14px}
+  .clock-prev{text-align:center;font-size:34px;font-weight:700;color:var(--accent2);
+    font-variant-numeric:tabular-nums;margin-bottom:8px}
+  .step-lab{text-align:center;font-size:12px;color:var(--muted);margin-bottom:10px}
+  .dial{position:relative;width:240px;height:240px;margin:0 auto;border-radius:50%;
+    background:var(--card2);border:1px solid var(--line)}
+  .dial .center{position:absolute;left:50%;top:50%;width:6px;height:6px;border-radius:50%;
+    background:var(--accent2);transform:translate(-50%,-50%)}
+  .pt{position:absolute;width:34px;height:34px;border-radius:50%;transform:translate(-50%,-50%);
+    display:flex;align-items:center;justify-content:center;font-size:13px;cursor:pointer;
+    color:var(--fg);user-select:none}
+  .pt.inner{font-size:11px;color:var(--muted)}
+  .pt:hover{background:#ffffff14}
+  .pt.sel{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;font-weight:700}
+  .modal .kbd{display:flex;align-items:center;gap:8px;margin:14px 0 4px;justify-content:center}
+  .modal .kbd span{font-size:12px;color:var(--muted)}
+  .modal .kbd input[type=time]{width:auto}
+  .modal-btns{display:flex;gap:10px;margin-top:14px}
+  .modal-btns button{flex:1;border:none;border-radius:10px;padding:11px;font-size:14px;
+    font-weight:600;cursor:pointer}
+  .ok{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff}
+  .cancel{background:#30363d;color:#f0f3f6}
+
+  /* settings drawer */
+  .drawer{position:fixed;top:0;right:0;height:100%;width:380px;max-width:92vw;
+    background:var(--card);border-left:1px solid var(--line);box-shadow:-12px 0 40px rgba(0,0,0,.5);
+    transform:translateX(100%);transition:transform .25s ease;z-index:60;overflow-y:auto;padding:22px}
+  .drawer.on{transform:translateX(0)}
+  .drawer h2{margin:0 0 16px;font-size:18px;display:flex;justify-content:space-between;align-items:center}
+  .drawer h2 .x{cursor:pointer;color:var(--muted);font-size:20px}
+  .fhint{font-size:11.5px;color:var(--muted2);margin-top:4px}
+
+  /* toast */
+  .toast{position:fixed;left:50%;bottom:28px;
+    transform:translateX(-50%) translateY(20px);
+    background:#1f2630;border:1px solid var(--line);color:var(--fg);padding:11px 18px;
+    border-radius:11px;font-size:13.5px;box-shadow:var(--shadow);opacity:0;pointer-events:none;
+    transition:.25s;z-index:80}
+  .toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  @media (max-width:600px){
+    body{padding:16px 10px 50px}
+    .metric{min-width:100%}
+    .drawer{width:100%}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div class="brand">
+      <div class="logo">&#9200;</div>
+      <div>
+        <h1>Claude Wake</h1>
+        <div class="tagline" id="tagline"></div>
+      </div>
+    </div>
+    <div class="topbtns">
+      <button class="iconbtn" id="langBtn" onclick="toggleLang()">中</button>
+      <button class="iconbtn" onclick="openDrawer()">&#9881;</button>
+    </div>
+  </div>
+
+  <div id="tmuxWarn" class="warn"></div>
+
+  <!-- status -->
+  <div class="card">
+    <div class="stathead">
+      <span id="dot" class="dot"></span>
+      <span class="state-big" id="state">&hellip;</span>
+    </div>
+    <div class="state-detail" id="detail"></div>
+
+    <div class="ringwrap" id="ringwrap">
+      <div class="ring">
+        <svg width="168" height="168" viewBox="0 0 168 168">
+          <circle cx="84" cy="84" r="74" fill="none" stroke="#272e38" stroke-width="12"/>
+          <circle id="ringFg" cx="84" cy="84" r="74" fill="none" stroke="url(#g)"
+                  stroke-width="12" stroke-linecap="round"
+                  stroke-dasharray="464.96" stroke-dashoffset="464.96"/>
+          <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#7c5cff"/><stop offset="1" stop-color="#9d86ff"/>
+          </linearGradient></defs>
+        </svg>
+        <div class="cd"><div class="t" id="countdown">--:--:--</div>
+          <div class="l" id="cdLabel"></div></div>
+      </div>
+    </div>
+
+    <div class="metrics">
+      <div class="metric"><div class="k" id="m_rounds_k"></div><div class="v" id="rounds">0</div></div>
+      <div class="metric"><div class="k" id="m_until_k"></div><div class="v" id="untilShow">&mdash;</div></div>
+      <div class="metric"><div class="k" id="m_event_k"></div><div class="v" id="lastEvent" style="font-size:13px">&mdash;</div></div>
+    </div>
+  </div>
+
+  <!-- controls -->
+  <div class="card">
+    <label id="lab_stopat"></label>
+    <div class="chips" id="chips"></div>
+    <div class="preview" id="stopPreview"></div>
+
+    <div class="toggle-row">
+      <span class="lab" id="lab_notify"></span>
+      <label class="sw"><input type="checkbox" id="notify" checked><span class="sl"></span></label>
+    </div>
+    <div class="toggle-row">
+      <span class="lab">
+        <span id="lab_drive"></span>
+        <span class="info" id="driveInfo" title="">i</span>
+      </span>
+      <label class="sw"><input type="checkbox" id="drive"><span class="sl"></span></label>
+    </div>
+
+    <label id="lab_maxrounds"></label>
+    <input type="number" id="maxRounds" value="0" min="0">
+
+    <div class="btns">
+      <button class="btn start" id="startBtn" onclick="doStart()"></button>
+      <button class="btn stop" id="stopBtn" onclick="doStop()" disabled></button>
+    </div>
+
+    <details class="adv">
+      <summary id="lab_adv"></summary>
+      <div class="tools">
+        <button onclick="testBtn('/test-continue')" id="lab_testcont"></button>
+        <button onclick="testBtn('/test-notify')" id="lab_testnotify"></button>
+      </div>
+    </details>
+  </div>
+</div>
+
+<!-- clock dial modal -->
+<div class="overlay" id="clockOverlay">
+  <div class="modal">
+    <h3 id="clk_title"></h3>
+    <div class="mp" id="clk_sub"></div>
+    <div class="clock-prev" id="clkPrev">--:--</div>
+    <div class="step-lab" id="clkStep"></div>
+    <div class="dial" id="dial"><div class="center"></div></div>
+    <div class="kbd">
+      <span id="clk_kbd"></span>
+      <input type="time" id="clkTime">
+    </div>
+    <div class="modal-btns">
+      <button class="cancel" id="clk_cancel" onclick="closeClock()"></button>
+      <button class="ok" id="clk_ok" onclick="confirmClock()"></button>
+    </div>
+  </div>
+</div>
+
+<!-- settings drawer -->
+<div class="overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
+<div class="drawer" id="drawer">
+  <h2><span id="set_title"></span><span class="x" onclick="closeDrawer()">&times;</span></h2>
+  <label id="set_tmux"></label><input type="text" id="cfg_tmux_session">
+  <label id="set_workdir"></label><input type="text" id="cfg_work_dir">
+  <label id="set_args"></label><input type="text" id="cfg_claude_launch_args">
+  <label id="set_continue"></label><textarea id="cfg_continue_text"></textarea>
+  <label id="set_done"></label><input type="text" id="cfg_done_marker">
+  <label id="set_poll"></label><input type="number" id="cfg_poll_sec" min="1">
+  <label id="set_buffer"></label><input type="number" id="cfg_buffer_sec" min="0">
+  <label id="set_token"></label><input type="password" id="cfg_telegram_bot_token">
+  <label id="set_chat"></label><input type="text" id="cfg_telegram_chat_id">
+  <label id="set_lang"></label>
+  <select id="cfg_lang"><option value="en">English</option><option value="zh">中文</option></select>
+  <div class="fhint" id="set_lang_hint"></div>
+  <label id="set_port"></label><input type="number" id="cfg_port" min="1">
+  <div class="fhint" id="set_port_hint"></div>
+  <div class="btns" style="margin-top:20px">
+    <button class="btn start" id="set_save" onclick="saveConfig()"></button>
+  </div>
+  <div class="fhint" id="set_apply_hint" style="margin-top:12px"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ---------- i18n ---------- */
+const STR = {
+  en: {
+    tagline: "Auto-resume Claude Code after the 5-hour usage limit resets.",
+    tmuxWarn: (s) => `No interactive session found (tmux <b>${s}</b>). Start Claude inside tmux: <code>tmux new -A -s ${s} claude</code>`,
+    st_stopped:"Stopped", st_running:"Running", st_waiting:"Waiting for reset",
+    d_not_started:"Not started yet",
+    d_watching:"Watching the session (waiting for a limit hit or progress)",
+    d_reset_at:(t)=>`Resets at ${t}, will continue automatically`,
+    d_continue_sent:"Sent 'continue', Claude is working",
+    d_continue_failed:(e)=>`Failed to send 'continue': ${e}`,
+    d_stopped_until:(t)=>`Reached stop time ${t}`,
+    d_stopped_rounds:(n)=>`Resumed ${n} round(s), limit reached`,
+    d_stopped_done:(m)=>`Detected done marker ${m}, work complete`,
+    d_stopped_manual:"Stopped manually",
+    m_rounds:"Rounds resumed", m_until:"Stop at", m_event:"Last event",
+    cd_label:"until reset", none:"No limit",
+    lab_stopat:"When should it stop?",
+    lab_notify:"Notify me when it stops",
+    lab_drive:"Drive mode (more aggressive)",
+    driveTip:"Even without a limit hit, re-sends 'continue' after each natural turn end to push more rounds. Uses more quota; only stops on ALL_DONE.",
+    lab_maxrounds:"Stop after at most N rounds (0 = unlimited)",
+    start:"Start", stop:"Stop",
+    adv:"Advanced", testcont:"Test: send 'continue' once", testnotify:"Test: send a notification",
+    chip_none:"No limit", chip_custom:"Custom ⏰", chip_p2:"+2 h", chip_p4:"+4 h",
+    clk_title:"Pick a time", clk_sub:"Tap the dial, or use the time box below",
+    clk_hour:"Pick the hour", clk_min:"Pick the minutes",
+    clk_kbd:"Keyboard:", clk_ok:"OK", clk_cancel:"Cancel",
+    set_title:"Settings",
+    set_tmux:"tmux session name", set_workdir:"Working directory (locates the transcript)",
+    set_args:"Claude launch args", set_continue:"Continue text",
+    set_done:"Done marker", set_poll:"Poll interval (sec)", set_buffer:"Buffer after reset (sec)",
+    set_token:"Telegram bot token", set_chat:"Telegram chat id",
+    set_lang:"Notification language", set_lang_hint:"Language used in notifications and stop reasons.",
+    set_port:"Port", set_port_hint:"Changing the port requires a backend restart.",
+    set_save:"Save", set_apply_hint:"Watcher settings (poll, buffer, continue text, etc.) take effect on the next Start.",
+    saved:"Settings saved", save_restart:"Saved — restart the backend for the new port",
+    sent:"Sent", started:"Started", stopped:"Stopped",
+    prev_none:"Runs with no time limit.",
+    prev_at:(day,hm,h)=>`Will stop ${day} ${hm} (~${h} from now)`,
+    today:"today", tomorrow:"tomorrow",
+    unit_min:" min", unit_h:" h"
+  },
+  zh: {
+    tagline: "5 小时额度恢复后，自动叫醒 Claude Code 接着干。",
+    tmuxWarn: (s) => `没找到交互会话（tmux <b>${s}</b>）。请在 tmux 里启动 Claude：<code>tmux new -A -s ${s} claude</code>`,
+    st_stopped:"已停止", st_running:"运行中", st_waiting:"等待额度恢复",
+    d_not_started:"尚未启动",
+    d_watching:"正在监视会话（等待撞限或工作进展）",
+    d_reset_at:(t)=>`恢复时间 ${t}，到点自动续`,
+    d_continue_sent:"已送『继续』，Claude 接着干",
+    d_continue_failed:(e)=>`送『继续』失败：${e}`,
+    d_stopped_until:(t)=>`到达停点 ${t}`,
+    d_stopped_rounds:(n)=>`已续够 ${n} 轮`,
+    d_stopped_done:(m)=>`检测到完成标记 ${m}，工作完成`,
+    d_stopped_manual:"手动停止",
+    m_rounds:"已续轮数", m_until:"停点", m_event:"最近事件",
+    cd_label:"距恢复", none:"不限",
+    lab_stopat:"几点自动停止？",
+    lab_notify:"停止时通知我",
+    lab_drive:"drive 模式（更激进）",
+    driveTip:"即使没撞限，每当 Claude 一轮自然结束也补送『继续』，持续推进多轮。更费额度，只靠 ALL_DONE 才停。",
+    lab_maxrounds:"最多续多少轮后兜底停止？（0 = 不限）",
+    start:"开始", stop:"停止",
+    adv:"高级", testcont:"测试：送一次『继续』", testnotify:"测试：发一条通知",
+    chip_none:"不限", chip_custom:"自定义 ⏰", chip_p2:"+2 小时", chip_p4:"+4 小时",
+    clk_title:"选择时间", clk_sub:"点表盘，或用下面的时间框",
+    clk_hour:"选小时", clk_min:"选分钟",
+    clk_kbd:"键盘：", clk_ok:"确定", clk_cancel:"取消",
+    set_title:"设置",
+    set_tmux:"tmux 会话名", set_workdir:"工作目录（用于定位会话记录）",
+    set_args:"Claude 启动参数", set_continue:"续跑文本",
+    set_done:"完成标记", set_poll:"轮询间隔（秒）", set_buffer:"恢复后缓冲（秒）",
+    set_token:"Telegram bot token", set_chat:"Telegram chat id",
+    set_lang:"通知语言", set_lang_hint:"通知与停止原因所用的语言。",
+    set_port:"端口", set_port_hint:"修改端口需重启后端。",
+    set_save:"保存", set_apply_hint:"看门狗设置（轮询、缓冲、续跑文本等）在下次「开始」时生效。",
+    saved:"设置已保存", save_restart:"已保存 — 新端口需重启后端",
+    sent:"已发送", started:"已开始", stopped:"已停止",
+    prev_none:"不限时运行。",
+    prev_at:(day,hm,h)=>`将于${day} ${hm} 停止（约 ${h}后）`,
+    today:"今天", tomorrow:"明天",
+    unit_min:" 分钟", unit_h:" 小时"
+  }
+};
+let lang = localStorage.getItem("cw_lang") ||
+           ((navigator.language||"en").toLowerCase().startsWith("zh") ? "zh" : "en");
+function T(){ return STR[lang]; }
+
+/* ---------- stop-at state ---------- */
+let untilValue = "";      // "" = no limit, else "HH:MM"
+let selectedChip = "none";
+
+const CHIP_DEFS = [
+  {id:"none",  label:()=>T().chip_none, val:()=>""},
+  {id:"7:00",  label:()=>"7:00 AM",   val:()=>"07:00"},
+  {id:"8:00",  label:()=>"8:00 AM",   val:()=>"08:00"},
+  {id:"12:00", label:()=>"12:00 PM",  val:()=>"12:00"},
+  {id:"p2",    label:()=>T().chip_p2, val:()=>plusHours(2)},
+  {id:"p4",    label:()=>T().chip_p4, val:()=>plusHours(4)},
+  {id:"custom",label:()=>T().chip_custom, val:null},
+];
+
+function plusHours(h){
+  let d = new Date(Date.now() + h*3600*1000);
+  let m = d.getMinutes();
+  let add = (5 - (m % 5)) % 5;
+  d = new Date(d.getTime() + add*60*1000);
+  d.setSeconds(0,0);
+  return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
+}
+
+function renderChips(){
+  const box = document.getElementById("chips");
+  box.innerHTML = "";
+  CHIP_DEFS.forEach(def=>{
+    const el = document.createElement("div");
+    el.className = "chip" + (selectedChip===def.id ? " sel" : "");
+    let lbl = def.label();
+    if((def.id==="p2"||def.id==="p4") && selectedChip===def.id && untilValue)
+      lbl += " → " + untilValue;
+    if(def.id==="custom" && selectedChip==="custom" && untilValue)
+      lbl = untilValue + " ⏰";
+    el.textContent = lbl;
+    el.onclick = ()=> pickChip(def);
+    box.appendChild(el);
+  });
+}
+
+function pickChip(def){
+  selectedChip = def.id;
+  if(def.id==="custom"){ openClock(); return; }
+  untilValue = def.val();
+  renderChips();
+  renderPreview();
+}
+
+function renderPreview(){
+  const p = document.getElementById("stopPreview");
+  if(!untilValue){ p.textContent = T().prev_none; return; }
+  const m = untilValue.match(/^(\d{1,2}):(\d{2})$/);
+  if(!m){ p.textContent=""; return; }
+  const now = new Date();
+  let cand = new Date(now); cand.setHours(+m[1],+m[2],0,0);
+  let day = T().today;
+  if(cand <= now){ cand = new Date(cand.getTime()+86400000); day = T().tomorrow; }
+  const diffH = (cand - now)/3600000;
+  let hstr;
+  if(diffH < 1) hstr = Math.round(diffH*60) + T().unit_min;
+  else hstr = (Math.round(diffH*10)/10) + T().unit_h;
+  p.textContent = T().prev_at(day, untilValue, hstr);
+}
+
+/* ---------- clock dial ---------- */
+let clkStep = "hour", clkHour = 8, clkMin = 0;
+
+function openClock(){
+  const init = (untilValue.match(/^(\d{1,2}):(\d{2})$/));
+  if(init){ clkHour=+init[1]; clkMin=+init[2]; }
+  else { clkHour=8; clkMin=0; }
+  clkStep = "hour";
+  document.getElementById("clkTime").value =
+    String(clkHour).padStart(2,"0")+":"+String(clkMin).padStart(2,"0");
+  drawDial();
+  document.getElementById("clockOverlay").classList.add("on");
+}
+function closeClock(){
+  document.getElementById("clockOverlay").classList.remove("on");
+  // if user cancelled and nothing chosen, fall back to no-limit selection visual
+  if(!untilValue){ selectedChip="none"; renderChips(); renderPreview(); }
+}
+function confirmClock(){
+  untilValue = String(clkHour).padStart(2,"0")+":"+String(clkMin).padStart(2,"0");
+  selectedChip = "custom";
+  document.getElementById("clockOverlay").classList.remove("on");
+  renderChips(); renderPreview();
+}
+
+function drawDial(){
+  const dial = document.getElementById("dial");
+  [...dial.querySelectorAll(".pt")].forEach(n=>n.remove());
+  document.getElementById("clkPrev").textContent =
+    String(clkHour).padStart(2,"0")+":"+String(clkMin).padStart(2,"0");
+  document.getElementById("clkStep").textContent =
+    clkStep==="hour" ? T().clk_hour : T().clk_min;
+  const cx=120, cy=120;
+  if(clkStep==="hour"){
+    // outer ring 1..12, inner ring 13..24 (24 shown as "00")
+    for(let i=1;i<=12;i++) addPoint(cx,cy,90,i*30,i,String(i),false);
+    for(let i=13;i<=24;i++){
+      const disp = (i===24) ? "00" : String(i);
+      const ang = ((i-12)*30);
+      addPoint(cx,cy,58,ang,(i===24?0:i),disp,true);
+    }
+  } else {
+    for(let i=0;i<12;i++){
+      const val=i*5;
+      addPoint(cx,cy,90,i*30,val,String(val).padStart(2,"0"),false);
+    }
+  }
+}
+function addPoint(cx,cy,r,angDeg,value,label,inner){
+  const a=(angDeg-90)*Math.PI/180;
+  const x=cx+r*Math.cos(a), y=cy+r*Math.sin(a);
+  const el=document.createElement("div");
+  el.className="pt"+(inner?" inner":"");
+  const sel = (clkStep==="hour" && value===clkHour) ||
+              (clkStep==="min"  && value===clkMin);
+  if(sel) el.className+=" sel";
+  el.style.left=x+"px"; el.style.top=y+"px";
+  el.textContent=label;
+  el.onclick=()=>{
+    if(clkStep==="hour"){ clkHour=value; clkStep="min"; }
+    else { clkMin=value; }
+    document.getElementById("clkTime").value =
+      String(clkHour).padStart(2,"0")+":"+String(clkMin).padStart(2,"0");
+    drawDial();
+  };
+  document.getElementById("dial").appendChild(el);
+}
+document.getElementById("clkTime").addEventListener("input", e=>{
+  const m=e.target.value.match(/^(\d{1,2}):(\d{2})$/);
+  if(m){ clkHour=+m[1]; clkMin=+m[2]; drawDial(); }
+});
+
+/* ---------- status polling + ring ---------- */
+let resetTargetEpoch=0, resetTotalSec=0;
+
+async function refresh(){
+  try{
+    const r=await fetch("/status"); const s=await r.json(); render(s);
+  }catch(e){}
+}
+function detailText(d){
+  if(!d || !d.code) return "";
+  const t=T();
+  switch(d.code){
+    case "not_started": return t.d_not_started;
+    case "watching": return t.d_watching;
+    case "reset_at": return t.d_reset_at(d.t);
+    case "continue_sent": return t.d_continue_sent;
+    case "continue_failed": return t.d_continue_failed(d.err);
+    case "stopped_until": return t.d_stopped_until(d.t);
+    case "stopped_rounds": return t.d_stopped_rounds(d.n);
+    case "stopped_done": return t.d_stopped_done(d.m);
+    case "stopped_manual": return t.d_stopped_manual;
+    default: return "";
+  }
+}
+function render(s){
+  const t=T();
+  const stateMap={stopped:t.st_stopped, running:t.st_running, waiting_reset:t.st_waiting};
+  const colorMap={stopped:"var(--grey)", running:"var(--green)", waiting_reset:"var(--amber)"};
+  document.getElementById("state").textContent = stateMap[s.state]||s.state||"—";
+  document.getElementById("detail").textContent = detailText(s.detail);
+  document.getElementById("dot").style.background = colorMap[s.state]||"var(--grey)";
+  document.getElementById("rounds").textContent = s.rounds ?? 0;
+  document.getElementById("untilShow").textContent = s.until || t.none;
+  document.getElementById("lastEvent").textContent = s.last_event || "—";
+
+  const warn=document.getElementById("tmuxWarn");
+  warn.innerHTML = t.tmuxWarn(s.tmux_session||"claude-work");
+  warn.style.display = s.tmux_alive ? "none" : "block";
+
+  document.getElementById("startBtn").disabled = s.running;
+  document.getElementById("stopBtn").disabled = !s.running;
+
+  const rw=document.getElementById("ringwrap");
+  if(s.state==="waiting_reset" && s.reset_eta_sec>0){
+    resetTargetEpoch = Date.now()+s.reset_eta_sec*1000;
+    resetTotalSec = s.reset_total_sec>0 ? s.reset_total_sec : s.reset_eta_sec;
+    rw.style.display="flex";
+  } else {
+    resetTargetEpoch=0; resetTotalSec=0; rw.style.display="none";
+  }
+}
+const RING_C = 2*Math.PI*74;
+function tick(){
+  if(!resetTargetEpoch) return;
+  let sec=Math.max(0,Math.round((resetTargetEpoch-Date.now())/1000));
+  const h=String(Math.floor(sec/3600)).padStart(2,"0");
+  const m=String(Math.floor((sec%3600)/60)).padStart(2,"0");
+  const s=String(sec%60).padStart(2,"0");
+  document.getElementById("countdown").textContent=`${h}:${m}:${s}`;
+  let prog = resetTotalSec>0 ? 1-(sec/resetTotalSec) : 0;
+  prog=Math.min(1,Math.max(0,prog));
+  document.getElementById("ringFg").style.strokeDashoffset = RING_C*(1-prog);
+}
+
+/* ---------- actions ---------- */
+async function doStart(){
+  const body={
+    until: untilValue,
+    max_rounds: parseInt(document.getElementById("maxRounds").value||"0",10),
+    drive: document.getElementById("drive").checked,
+    notify: document.getElementById("notify").checked,
+  };
+  await fetch("/start",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(body)});
+  toast(T().started); refresh();
+}
+async function doStop(){ await fetch("/stop",{method:"POST"}); toast(T().stopped); refresh(); }
+async function testBtn(url){
+  const r=await fetch(url,{method:"POST"}); const j=await r.json();
+  toast(j.msg||(j.ok?T().sent:"failed"));
+}
+
+/* ---------- settings drawer ---------- */
+async function openDrawer(){
+  const r=await fetch("/config"); const c=await r.json();
+  document.getElementById("cfg_tmux_session").value=c.tmux_session||"";
+  document.getElementById("cfg_work_dir").value=c.work_dir||"";
+  document.getElementById("cfg_claude_launch_args").value=c.claude_launch_args||"";
+  document.getElementById("cfg_continue_text").value=c.continue_text||"";
+  document.getElementById("cfg_done_marker").value=c.done_marker||"";
+  document.getElementById("cfg_poll_sec").value=c.poll_sec ?? 30;
+  document.getElementById("cfg_buffer_sec").value=c.buffer_sec ?? 60;
+  const tk=document.getElementById("cfg_telegram_bot_token");
+  tk.value=""; tk.placeholder = c.telegram_bot_token==="***" ? "*** (set)" : "";
+  document.getElementById("cfg_telegram_chat_id").value=c.telegram_chat_id||"";
+  document.getElementById("cfg_lang").value=c.lang||"en";
+  document.getElementById("cfg_port").value=c.port ?? 8770;
+  document.getElementById("drawer").classList.add("on");
+  document.getElementById("drawerOverlay").classList.add("on");
+}
+function closeDrawer(){
+  document.getElementById("drawer").classList.remove("on");
+  document.getElementById("drawerOverlay").classList.remove("on");
+}
+async function saveConfig(){
+  const tkEl=document.getElementById("cfg_telegram_bot_token");
+  const body={
+    tmux_session:document.getElementById("cfg_tmux_session").value,
+    work_dir:document.getElementById("cfg_work_dir").value,
+    claude_launch_args:document.getElementById("cfg_claude_launch_args").value,
+    continue_text:document.getElementById("cfg_continue_text").value,
+    done_marker:document.getElementById("cfg_done_marker").value,
+    poll_sec:parseInt(document.getElementById("cfg_poll_sec").value||"30",10),
+    buffer_sec:parseInt(document.getElementById("cfg_buffer_sec").value||"60",10),
+    telegram_chat_id:document.getElementById("cfg_telegram_chat_id").value,
+    lang:document.getElementById("cfg_lang").value,
+    port:parseInt(document.getElementById("cfg_port").value||"8770",10),
+  };
+  // empty input + a stored token => keep existing via "***"; otherwise send literal (incl. "")
+  if(tkEl.value==="" && tkEl.placeholder.startsWith("***")) body.telegram_bot_token="***";
+  else body.telegram_bot_token=tkEl.value;
+  const r=await fetch("/config",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(body)});
+  const j=await r.json();
+  toast(j.restart_required ? T().save_restart : T().saved);
+  closeDrawer();
+}
+
+/* ---------- lang + static labels ---------- */
+function applyLabels(){
+  const t=T();
+  document.getElementById("tagline").textContent=t.tagline;
+  document.getElementById("m_rounds_k").textContent=t.m_rounds;
+  document.getElementById("m_until_k").textContent=t.m_until;
+  document.getElementById("m_event_k").textContent=t.m_event;
+  document.getElementById("cdLabel").textContent=t.cd_label;
+  document.getElementById("lab_stopat").textContent=t.lab_stopat;
+  document.getElementById("lab_notify").textContent=t.lab_notify;
+  document.getElementById("lab_drive").textContent=t.lab_drive;
+  document.getElementById("driveInfo").title=t.driveTip;
+  document.getElementById("lab_maxrounds").textContent=t.lab_maxrounds;
+  document.getElementById("startBtn").textContent=t.start;
+  document.getElementById("stopBtn").textContent=t.stop;
+  document.getElementById("lab_adv").textContent=t.adv;
+  document.getElementById("lab_testcont").textContent=t.testcont;
+  document.getElementById("lab_testnotify").textContent=t.testnotify;
+  document.getElementById("clk_title").textContent=t.clk_title;
+  document.getElementById("clk_sub").textContent=t.clk_sub;
+  document.getElementById("clk_kbd").textContent=t.clk_kbd;
+  document.getElementById("clk_ok").textContent=t.clk_ok;
+  document.getElementById("clk_cancel").textContent=t.clk_cancel;
+  document.getElementById("set_title").textContent=t.set_title;
+  document.getElementById("set_tmux").textContent=t.set_tmux;
+  document.getElementById("set_workdir").textContent=t.set_workdir;
+  document.getElementById("set_args").textContent=t.set_args;
+  document.getElementById("set_continue").textContent=t.set_continue;
+  document.getElementById("set_done").textContent=t.set_done;
+  document.getElementById("set_poll").textContent=t.set_poll;
+  document.getElementById("set_buffer").textContent=t.set_buffer;
+  document.getElementById("set_token").textContent=t.set_token;
+  document.getElementById("set_chat").textContent=t.set_chat;
+  document.getElementById("set_lang").textContent=t.set_lang;
+  document.getElementById("set_lang_hint").textContent=t.set_lang_hint;
+  document.getElementById("set_port").textContent=t.set_port;
+  document.getElementById("set_port_hint").textContent=t.set_port_hint;
+  document.getElementById("set_save").textContent=t.set_save;
+  document.getElementById("set_apply_hint").textContent=t.set_apply_hint;
+  document.getElementById("langBtn").textContent = lang==="zh" ? "EN" : "中";
+  document.documentElement.lang = lang==="zh" ? "zh-CN" : "en";
+  renderChips(); renderPreview();
+  if(document.getElementById("clockOverlay").classList.contains("on")) drawDial();
+}
+function toggleLang(){
+  lang = lang==="zh" ? "en" : "zh";
+  localStorage.setItem("cw_lang", lang);
+  applyLabels();
+}
+
+/* ---------- toast ---------- */
+let toastTimer=null;
+function toast(msg){
+  const el=document.getElementById("toast");
+  el.textContent=msg; el.classList.add("on");
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>el.classList.remove("on"),2600);
+}
+
+/* ---------- boot ---------- */
+applyLabels();
+refresh();
+setInterval(refresh,3000);
+setInterval(tick,1000);
+</script>
+</body>
+</html>
