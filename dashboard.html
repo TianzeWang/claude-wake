@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csrf-token" content="__CSRF_TOKEN__">
 <title>Claude Wake</title>
 <style>
   :root{
@@ -537,6 +538,14 @@ document.getElementById("clkTime").addEventListener("input", e=>{
   if(m){ clkHour=+m[1]; clkMin=+m[2]; drawDial(); }
 });
 
+/* ---------- CSRF-protected POST helper ---------- */
+const CSRF = document.querySelector('meta[name=csrf-token]')?.content || "";
+function apiPost(url, body){
+  const opt = { method:"POST", headers:{ "X-CSRF-Token": CSRF } };
+  if(body !== undefined){ opt.headers["Content-Type"]="application/json"; opt.body=JSON.stringify(body); }
+  return fetch(url, opt);
+}
+
 /* ---------- status polling + ring ---------- */
 let resetTargetEpoch=0, resetTotalSec=0;
 
@@ -621,14 +630,12 @@ async function doStart(){
     notify: document.getElementById("notify").checked,
     confirm_sec: cw ? Math.max(60, cm*60) : 0,
   };
-  await fetch("/start",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify(body)});
+  await apiPost("/start", body);
   toast(T().started); refresh();
 }
-async function doStop(){ await fetch("/stop",{method:"POST"}); toast(T().stopped); refresh(); }
+async function doStop(){ await apiPost("/stop"); toast(T().stopped); refresh(); }
 async function doConfirm(action){
-  await fetch("/confirm",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({action})});
+  await apiPost("/confirm", {action});
   refresh();
 }
 function confirmRowUI(){
@@ -636,7 +643,7 @@ function confirmRowUI(){
     document.getElementById("confirmWait").checked ? "block" : "none";
 }
 async function testBtn(url){
-  const r=await fetch(url,{method:"POST"}); const j=await r.json();
+  const r=await apiPost(url); const j=await r.json();
   toast(j.msg||(j.ok?T().sent:"failed"));
 }
 
@@ -671,8 +678,7 @@ async function saveConfig(){
     lang:document.getElementById("cfg_lang").value,
     port:parseInt(document.getElementById("cfg_port").value||"8770",10),
   };
-  const r=await fetch("/config",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify(body)});
+  const r=await apiPost("/config", body);
   const j=await r.json();
   toast(j.restart_required ? T().save_restart : T().saved);
   closeDrawer();
