@@ -12,7 +12,7 @@ It stops (and notifies you) when it reaches one of three boundaries.
 It is a tiny local tool: **pure Python standard library + tmux, nothing to install.**
 The backend binds to `127.0.0.1` only and never reads your Claude credentials.
 
-![dashboard](assets/screenshot.png)
+<!-- ![dashboard](assets/screenshot.png) — add a screenshot of the dashboard here -->
 
 ---
 

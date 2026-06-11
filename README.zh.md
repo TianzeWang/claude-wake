@@ -11,7 +11,7 @@
 这是一个很小的本地工具：**纯 Python 标准库 + tmux，不用安装任何东西。**
 后端只绑定 `127.0.0.1`，且从不读取你的 Claude 凭据。
 
-![dashboard](assets/screenshot.png)
+<!-- ![dashboard](assets/screenshot.png) — 截一张控制台的图放到 assets/ 后取消本行注释 -->
 
 ---
 
