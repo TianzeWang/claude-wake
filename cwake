@@ -70,4 +70,9 @@ else
 fi
 
 # 落到这个目录下的 Claude TUI（tmux，已存在则直接 attach）
-exec tmux new -A -s "$sess" -c "$WD" claude
+# 清掉可能继承来的 Claude 会话变量（tmux 服务器若是从某个 claude 内部起的，会把这套
+# 变量快照成全局环境，传给每个新窗口）。否则新起的 claude 被当成子会话，用量不按顶层
+# 会话落盘，ccusage 之类就统计不到。env -u 对没设置的变量静默忽略，干净环境下是 no-op。
+exec tmux new -A -s "$sess" -c "$WD" \
+  env -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION \
+      -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_EXECPATH claude
