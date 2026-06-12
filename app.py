@@ -186,7 +186,18 @@ def tail_text(path, nbytes=12000):
 
 _EPOCH_RE = re.compile(r"usage limit reached\|(\d{9,})")
 _HUMAN_RE = re.compile(r"resets\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)", re.IGNORECASE)
-_LIMIT_HINT_RE = re.compile(r"usage limit reached|5-?hour limit|limit reached", re.IGNORECASE)
+# Match Claude's limit notice in any wording we've seen on screen / in the transcript:
+#   "You've hit your session limit · resets 7:40pm"   (5-hour limit, current wording)
+#   "You've hit your usage limit ..."                  (weekly limit)
+#   "usage limit reached|<epoch>" / "5-hour limit" / "limit reached"  (older / machine formats)
+# Kept deliberately broad because triggering also requires a parseable reset time (see _loop),
+# which guards against the bare word "limit" in unrelated output.
+_LIMIT_HINT_RE = re.compile(
+    r"(?:hit|reached|exceeded)\s+(?:your|the)\b[^\n]*\blimit"   # "hit your session limit"
+    r"|\b(?:usage|session|rate)\s+limit\b"                        # "usage/session/rate limit"
+    r"|\b\d+\s*-?\s*hour\s+limit\b"                               # "5-hour limit"
+    r"|\blimit reached\b",                                         # legacy "limit reached"
+    re.IGNORECASE)
 
 
 def parse_limit_epoch(text):
@@ -526,6 +537,8 @@ class Watcher:
         cont_text = cfg.get("continue_text", "continue")
         done_marker = cfg.get("done_marker", "ALL_DONE")
         until_epoch = self._until_epoch()
+        last_hb = time.time()    # last heartbeat log
+        last_diag = ""           # de-dupe the "saw limit text but did not arm" diagnostic
 
         self._set(state="running", detail={"code": "watching"})
         self._log(f"watchdog started | tmux={sess} until={self.until or 'none'} "
@@ -610,6 +623,16 @@ class Watcher:
                 self._sleep(poll)
                 continue
 
+            # -- diagnostic: limit-looking text is on screen but we did not arm a wait --
+            # Logged once per distinct reason so a non-triggering limit leaves a trail instead of a silent gap.
+            elif _LIMIT_HINT_RE.search(pane) or _LIMIT_HINT_RE.search(tail):
+                why = "could not parse a reset time" if not epoch else "limit looks stale (not current)"
+                if last_diag != why:
+                    last_diag = why
+                    self._log(f"saw limit-like text but did not arm ({why})")
+            else:
+                last_diag = ""
+
             # -- (3) drive mode: idle and not at the limit -> nudge with continue to push more rounds --
             if self.drive and self._looks_idle(pane):
                 ok, err = send_continue(sess, cont_text, cfg.get("foreground_commands"))
@@ -618,6 +641,12 @@ class Watcher:
                     self._log(f"drive continue (round {self.rounds})")
                 else:
                     self._log(f"drive send-continue failed: {err}")
+
+            # heartbeat so a long quiet watch leaves a trail (the night this failed logged nothing for 9h)
+            if time.time() - last_hb >= 1800:
+                last_hb = time.time()
+                self._log(f"heartbeat | state={self.state} rounds={self.rounds} "
+                          f"tmux_alive={tmux_session_exists(sess)}")
 
             self._sleep(poll)
 
