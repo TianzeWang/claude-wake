@@ -92,7 +92,8 @@ cwake                 # 或：cwake /path/to/其他项目
 5. 把你送进该目录下 tmux 里的 Claude TUI。
 
 在两个不同项目目录各跑一次，就得到两套互不干扰、各占一个端口的 Claude Wake 实例。
-卸载：`rm ~/.local/bin/cwake`。
+关掉某个实例的 tmux 会话后，它的后端会自动退出、释放端口，不留僵尸进程（用
+`Ctrl-b d` 脱离则保持运行，正是整夜续跑需要的）。卸载：`rm ~/.local/bin/cwake`。
 
 > 需要 `PATH` 上有 `python3`、`tmux`、`curl`。启动器是 zsh 脚本，`install.sh` 是 bash。
 

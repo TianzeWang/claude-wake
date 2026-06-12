@@ -45,6 +45,7 @@ if (( ! up )); then
   "buffer_sec": 60,
   "default_until": "$until_hm",
   "default_max_rounds": 0,
+  "exit_on_tmux_close": true,
   "lang": "zh"
 }
 JSON
