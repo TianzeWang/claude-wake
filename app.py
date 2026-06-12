@@ -58,7 +58,12 @@ DEFAULT_CONFIG = {
     "default_until": "08:00",          # default value of the dashboard "stop at" control
     "default_max_rounds": 0,           # 0 = unlimited rounds
     "lang": "en",                      # notification language: "en" or "zh"
+    "exit_on_tmux_close": False,       # once the tmux session has been seen alive, exit the backend when it closes so the port frees (the cwake launcher turns this on)
 }
+
+# How many consecutive polls the tmux session must stay missing (after having been seen
+# alive) before exit_on_tmux_close fires -- guards against a transient `tmux` hiccup.
+TMUX_GONE_GRACE_POLLS = 2
 
 
 def load_config():
@@ -96,6 +101,7 @@ STRINGS = {
         "reason_done": "Detected done marker {m}, work complete",
         "reason_manual": "Stopped manually",
         "reason_user": "You chose to take over manually",
+        "reason_tmux_closed": "tmux session closed, backend exiting",
     },
     "zh": {
         "notify_stopped_title": "Claude Wake 已停止",
@@ -109,6 +115,7 @@ STRINGS = {
         "reason_done": "检测到完成标记 {m}，工作完成",
         "reason_manual": "手动停止",
         "reason_user": "你选择了自己接手",
+        "reason_tmux_closed": "tmux 会话已关闭，后端退出",
     },
 }
 
@@ -541,6 +548,9 @@ class Watcher:
         until_epoch = self._until_epoch()
         last_hb = time.time()    # last heartbeat log
         last_diag = ""           # de-dupe the "saw limit text but did not arm" diagnostic
+        exit_on_close = bool(cfg.get("exit_on_tmux_close", False))
+        seen_alive = False       # becomes True the first time the tmux session is observed alive
+        gone_polls = 0           # consecutive polls the session has been missing since then
 
         self._set(state="running", detail={"code": "watching"})
         self._log(f"watchdog started | tmux={sess} until={self.until or 'none'} "
@@ -563,6 +573,21 @@ class Watcher:
                 stop_with({"code": "stopped_rounds", "n": self.max_rounds},
                           L(cfg, "reason_rounds", n=self.max_rounds))
                 return
+
+            # -- tmux session closed? Once we have seen it alive, its disappearance for a short
+            #    grace means the user closed the session -> shut the backend down so the port
+            #    frees instead of leaking a zombie. Detaching keeps the session alive (it still
+            #    exists), so this only fires on a real close, never on Ctrl-b d.
+            if exit_on_close:
+                if tmux_session_exists(sess):
+                    seen_alive = True
+                    gone_polls = 0
+                elif seen_alive:
+                    gone_polls += 1
+                    if gone_polls >= TMUX_GONE_GRACE_POLLS:
+                        stop_with({"code": "stopped_tmux_closed"}, L(cfg, "reason_tmux_closed"))
+                        _shutdown_backend()
+                        return
 
             tx = newest_transcript(work_dir)
             tail = tail_text(tx) if tx else ""
@@ -711,6 +736,7 @@ class Watcher:
 # ---------------------------------------------------------------------------
 WATCHER = None
 CFG = None
+HTTPD = None    # set in main(); used to shut the server down when the tmux session closes
 
 # A per-process secret. The dashboard reads it from its own (same-origin) HTML and echoes it
 # back as the X-CSRF-Token header on every POST; a cross-site page cannot read it, so it cannot
@@ -723,6 +749,7 @@ CONFIG_WHITELIST = {
     "tmux_session", "work_dir", "claude_launch_args", "foreground_commands",
     "continue_text", "done_marker",
     "poll_sec", "buffer_sec", "default_until", "default_max_rounds", "lang", "port",
+    "exit_on_tmux_close",
 }
 CONFIG_INT_FIELDS = {"poll_sec", "buffer_sec", "default_max_rounds", "port"}
 CONFIG_LIST_FIELDS = {"foreground_commands"}
@@ -731,6 +758,12 @@ CONFIG_LIST_FIELDS = {"foreground_commands"}
 def save_config(cfg):
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+
+def _shutdown_backend():
+    """Stop the HTTP server (from a worker thread) so the process exits and frees its port."""
+    if HTTPD is not None:
+        threading.Thread(target=HTTPD.shutdown, daemon=True).start()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -855,12 +888,13 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    global WATCHER, CFG
+    global WATCHER, CFG, HTTPD
     CFG = load_config()
     WATCHER = Watcher(CFG)
     os.makedirs(LOG_DIR, exist_ok=True)
     port = int(CFG.get("port", 8770))
     httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    HTTPD = httpd
     print("=" * 56)
     print(f"  Claude Wake v{__version__} -- dashboard is up")
     print(f"  Open in your browser:  http://localhost:{port}")

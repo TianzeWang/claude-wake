@@ -94,7 +94,9 @@ Running `cwake` in a directory:
 5. Drops you into the Claude TUI in tmux, in that directory.
 
 Run it in two different project directories and you get two independent Claude Wake
-instances on two ports. Uninstall with `rm ~/.local/bin/cwake`.
+instances on two ports. Closing an instance's tmux session shuts its backend down and
+frees the port -- no leftover zombie processes (detaching with `Ctrl-b d` keeps it
+running, as you want for overnight resumes). Uninstall with `rm ~/.local/bin/cwake`.
 
 > Requires `python3`, `tmux`, and `curl` on `PATH`. The launcher is zsh; `install.sh`
 > is bash.
