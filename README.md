@@ -69,6 +69,38 @@ tmux new -A -s claude-work claude
 
 ---
 
+## Per-directory launcher: `cwake`
+
+`cwake` is a one-command launcher that wires up Claude Wake for **whatever directory
+you're in** -- no per-project `config.json` editing, and several directories can run
+side by side, each with its own dashboard, port, and tmux session.
+
+```bash
+./install.sh          # symlink `cwake` into ~/.local/bin (override with BINDIR=...)
+cd ~/some/project
+cwake                 # or: cwake /path/to/other/project
+```
+
+Running `cwake` in a directory:
+
+1. Derives a **stable port and tmux session** from the directory path (same dir =
+   same instance, so re-running just re-attaches).
+2. Writes a per-directory config under `~/.claude-wake/<session>/` and starts a
+   dedicated backend, isolated via the `CLAUDE_WAKE_CONFIG` / `CLAUDE_WAKE_LOGDIR`
+   env vars so instances never clobber each other's config or logs.
+3. Opens the dashboard.
+4. **Auto-arms the watchdog** with a ~24h stop time (the "1-day retry cap"); `drive`
+   stays off, so it only resumes on a real limit reset.
+5. Drops you into the Claude TUI in tmux, in that directory.
+
+Run it in two different project directories and you get two independent Claude Wake
+instances on two ports. Uninstall with `rm ~/.local/bin/cwake`.
+
+> Requires `python3`, `tmux`, and `curl` on `PATH`. The launcher is zsh; `install.sh`
+> is bash.
+
+---
+
 ## Configuration
 
 All settings live in `config.json` (gitignored). You can edit them in the

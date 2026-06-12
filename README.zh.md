@@ -68,6 +68,36 @@ tmux new -A -s claude-work claude
 
 ---
 
+## 按目录一键启动：`cwake`
+
+`cwake` 是一条命令的启动器，给**你当前所在的目录**自动配好 Claude Wake——不用逐项目
+手编 `config.json`，而且多个目录可以**并行**各跑一套，各有独立的控制台、端口和
+tmux 会话。
+
+```bash
+./install.sh          # 把 cwake 软链到 ~/.local/bin（可用 BINDIR=... 改目录）
+cd ~/某个项目
+cwake                 # 或：cwake /path/to/其他项目
+```
+
+在某个目录里运行 `cwake` 会：
+
+1. 由目录路径派生**稳定的端口和 tmux 会话名**（同一目录 = 同一套，重复运行只是重新 attach）。
+2. 在 `~/.claude-wake/<会话>/` 下写一份该目录专属配置，启动独立后端；靠
+   `CLAUDE_WAKE_CONFIG` / `CLAUDE_WAKE_LOGDIR` 两个环境变量隔离，实例之间互不覆盖
+   配置或日志。
+3. 打开控制台页面。
+4. **自动武装看门狗**，停点设为约 24 小时后（即"1 天 retry 上限"）；`drive` 保持关闭，
+   只在真正撞限恢复时才续。
+5. 把你送进该目录下 tmux 里的 Claude TUI。
+
+在两个不同项目目录各跑一次，就得到两套互不干扰、各占一个端口的 Claude Wake 实例。
+卸载：`rm ~/.local/bin/cwake`。
+
+> 需要 `PATH` 上有 `python3`、`tmux`、`curl`。启动器是 zsh 脚本，`install.sh` 是 bash。
+
+---
+
 ## 配置说明
 
 所有设置都在 `config.json`（已 gitignore）。你可以在控制台的**设置**抽屉里改，

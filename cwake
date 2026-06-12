@@ -1,0 +1,72 @@
+#!/usr/bin/env zsh
+# cwake — 按当前 working dir 一键起 claude-wake 服务+网页+tmux，默认 1 天 retry 封顶。
+# 安装：软链到 PATH 上的目录，例如  ln -s "$PWD/cwake" ~/.local/bin/cwake
+# 用法：在任意项目目录里敲  cwake   （或 cwake /some/other/dir）
+emulate -L zsh
+
+# 自定位：脚本即使经软链调用，${0:A:h} 也解析到 claude-wake 仓库真实目录
+WAKE_DIR=${CLAUDE_WAKE_HOME:-${0:A:h}}
+WD="${1:-$PWD}"; WD="${WD:A}"                                    # 取目录，转绝对+解符号链接
+
+[[ -f "$WAKE_DIR/app.py" ]] || { echo "找不到 claude-wake：$WAKE_DIR（可设 CLAUDE_WAKE_HOME）"; exit 1; }
+[[ -d "$WD" ]] || { echo "目录不存在：$WD"; exit 1; }
+
+# 由路径派生稳定的端口 / tmux 会话名 / 状态目录（同一目录每次映射到同一套）
+local h slug sess port state cfg url until_hm rwd i up=0
+h=$(printf '%s' "$WD" | cksum | cut -d' ' -f1)
+slug=${${WD:t}//[^A-Za-z0-9_-]/-}
+sess="cw-${slug}-$(( h % 10000 ))"
+state="$HOME/.claude-wake/$sess"
+cfg="$state/config.json"
+until_hm=$(date +%H:%M)                                          # 停点设成当前钟点→滚到明天 ≈24h 封顶
+port=$(( 8800 + h % 1000 ))
+
+# 选端口：优先用 hash 端口；若被“别的 wd”占了就顺延，避免误连到别人实例
+for i in {0..20}; do
+  rwd=$(curl -sf "http://127.0.0.1:$port/status" 2>/dev/null \
+        | sed -n 's/.*"work_dir": *"\([^"]*\)".*/\1/p')
+  if   [[ -z "$rwd"       ]]; then up=0; break                   # 空 → 端口可用
+  elif [[ "$rwd" == "$WD" ]]; then up=1; break                   # 已是本目录的实例
+  else port=$(( port + 1 )); fi                                  # 被别的 wd 占 → 换端口
+done
+url="http://127.0.0.1:$port"
+
+# 后端没起来才写 config 并启动（保证 config 文件与活实例状态一致）
+if (( ! up )); then
+  mkdir -p "$state/logs"
+  cat > "$cfg" <<JSON
+{
+  "port": $port,
+  "tmux_session": "$sess",
+  "work_dir": "$WD",
+  "continue_text": "继续。If everything is already done, output a single line at the end of your reply: ALL_DONE",
+  "done_marker": "ALL_DONE",
+  "poll_sec": 30,
+  "buffer_sec": 60,
+  "default_until": "$until_hm",
+  "default_max_rounds": 0,
+  "lang": "zh"
+}
+JSON
+  ( cd "$WAKE_DIR" && CLAUDE_WAKE_CONFIG="$cfg" CLAUDE_WAKE_LOGDIR="$state/logs" \
+      nohup python3 app.py >"$state/backend.log" 2>&1 & )
+  for i in {1..40}; do curl -sf -o /dev/null "$url/status" && break; sleep 0.25; done
+fi
+
+# 打开网页（macOS 用 open，Linux 自动退回 xdg-open）
+( open "$url" 2>/dev/null || xdg-open "$url" 2>/dev/null ) &!
+
+# 自动武装看门狗：抓 CSRF token → POST /start，until≈24h，drive 关（只在撞限制/额度恢复时续）
+local tok resp
+tok=$(curl -sf "$url/" | sed -n 's/.*name="csrf-token" content="\([^"]*\)".*/\1/p' | head -1)
+if [[ -n "$tok" ]]; then
+  resp=$(curl -sf -X POST "$url/start" -H "Origin: $url" -H "X-CSRF-Token: $tok" \
+           -H "Content-Type: application/json" \
+           -d "{\"until\":\"$until_hm\",\"max_rounds\":0,\"notify\":true}")
+  echo "claude-wake | 端口 $port | 会话 $sess | 停点 ~$until_hm(≈24h) | $resp"
+else
+  echo "⚠ 没拿到 CSRF token，请在 $url 手动点 Start"
+fi
+
+# 落到这个目录下的 Claude TUI（tmux，已存在则直接 attach）
+exec tmux new -A -s "$sess" -c "$WD" claude

@@ -36,9 +36,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 __version__ = "1.0.0"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(HERE, "config.json")
+# CONFIG_PATH / LOG_DIR may be redirected via env so several per-working-dir
+# instances can run side by side without clobbering the shared config or logs.
+CONFIG_PATH = os.environ.get("CLAUDE_WAKE_CONFIG") or os.path.join(HERE, "config.json")
 DASHBOARD_PATH = os.path.join(HERE, "dashboard.html")
-LOG_DIR = os.path.join(HERE, "logs")
+LOG_DIR = os.environ.get("CLAUDE_WAKE_LOGDIR") or os.path.join(HERE, "logs")
 
 # ---------------------------------------------------------------------------
 # Configuration
