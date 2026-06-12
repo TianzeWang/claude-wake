@@ -186,17 +186,17 @@ def tail_text(path, nbytes=12000):
 
 _EPOCH_RE = re.compile(r"usage limit reached\|(\d{9,})")
 _HUMAN_RE = re.compile(r"resets\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)", re.IGNORECASE)
-# Match Claude's limit notice in any wording we've seen on screen / in the transcript:
-#   "You've hit your session limit · resets 7:40pm"   (5-hour limit, current wording)
-#   "You've hit your usage limit ..."                  (weekly limit)
-#   "usage limit reached|<epoch>" / "5-hour limit" / "limit reached"  (older / machine formats)
-# Kept deliberately broad because triggering also requires a parseable reset time (see _loop),
-# which guards against the bare word "limit" in unrelated output.
+# Match only an ACTUAL limit *block* -- Claude has stopped and is waiting for the reset:
+#   "You've hit your session limit · resets 7:40pm"   (5-hour block, current wording)
+#   "You've hit your usage limit ..."                  (weekly block)
+#   "usage limit reached|<epoch>" / "limit reached"    (older / machine formats)
+# Must see a block verb next to "limit" (hit/reached/exceeded your ... limit, or "limit reached").
+# This deliberately does NOT match the approaching-limit WARNING, e.g.
+#   "You've used 95% of your session limit · resets 12:10pm"
+# where Claude is still working and NOT blocked -- matching it caused a false reset-wait.
 _LIMIT_HINT_RE = re.compile(
     r"(?:hit|reached|exceeded)\s+(?:your|the)\b[^\n]*\blimit"   # "hit your session limit"
-    r"|\b(?:usage|session|rate)\s+limit\b"                        # "usage/session/rate limit"
-    r"|\b\d+\s*-?\s*hour\s+limit\b"                               # "5-hour limit"
-    r"|\blimit reached\b",                                         # legacy "limit reached"
+    r"|\blimit reached\b",                                         # "limit reached" / "usage limit reached"
     re.IGNORECASE)
 
 
