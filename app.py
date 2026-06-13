@@ -232,7 +232,20 @@ def parse_human_reset(text, now=None):
         hour += 12
     cand = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     if cand <= now:
-        cand += _dt.timedelta(days=1)
+        # The stated reset time is in the past. If it only just passed (within an
+        # hour), the limit has effectively reset already -- retry promptly instead
+        # of rolling a full day forward. Only a clearly-stale time (hours ago, e.g.
+        # "resets 1am" seen at 11pm) means tomorrow's occurrence.
+        if now - cand <= _dt.timedelta(hours=1):
+            cand = now
+        else:
+            cand += _dt.timedelta(days=1)
+    # The 5-hour usage limit never resets more than 5h out, so we must never wait
+    # longer than that. Cap any over-shoot (e.g. a just-passed time mis-rolled to
+    # the next day, or a future time >5h away) at 5h instead of ~24h.
+    cap = now + _dt.timedelta(hours=5)
+    if cand > cap:
+        cand = cap
     return int(cand.timestamp())
 
 
