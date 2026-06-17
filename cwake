@@ -69,10 +69,22 @@ else
   echo "⚠ 没拿到 CSRF token，请在 $url 手动点 Start"
 fi
 
-# 落到这个目录下的 Claude TUI（tmux，已存在则直接 attach）
+# 落到这个目录下的 Claude TUI。
 # 清掉可能继承来的 Claude 会话变量（tmux 服务器若是从某个 claude 内部起的，会把这套
 # 变量快照成全局环境，传给每个新窗口）。否则新起的 claude 被当成子会话，用量不按顶层
 # 会话落盘，ccusage 之类就统计不到。env -u 对没设置的变量静默忽略，干净环境下是 no-op。
-exec tmux new -A -s "$sess" -c "$WD" \
-  env -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION \
-      -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_EXECPATH claude
+local CLEANV=(env -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION
+              -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_EXECPATH claude)
+
+# 会话已存在时不能无脑 attach：tmux-resurrect 恢复出来的往往是“空 shell + 死画面”，
+# 而 tmux new -A 对已存在会话会丢掉启动命令，导致 attach 到的 pane 里根本没跑 claude
+# （后端的续跑指令也就喂给了 shell）。所以：pane 不是 claude 时，就地 respawn 把它拉起来，
+# 顺带让新进程接管 pane、抹掉 resurrect 重放的死画面；已经在跑 claude 的会话则原样复用。
+if tmux has-session -t "$sess" 2>/dev/null; then
+  if [[ "$(tmux display -p -t "$sess" '#{pane_current_command}')" != claude ]]; then
+    tmux respawn-pane -k -t "$sess" -c "$WD" "${CLEANV[@]}"
+  fi
+  exec tmux attach -t "$sess"
+else
+  exec tmux new -s "$sess" -c "$WD" "${CLEANV[@]}"
+fi
